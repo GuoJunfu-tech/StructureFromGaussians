@@ -161,8 +161,18 @@ Since the **camera pose** in HyperNeRF is less precise compared to NeRF-DS, we u
 
 ### Real-Time Viewer
 
+please visit this site: https://github.com/yzslab/gaussian-splatting-lightning
+I will modify this project and add features to view the SFG results. 
+usage:
+```bash
+ python viewer.py \                       
+    /output/files/from/SFG \
+    --vanilla_deformable \
+    --reorient disable
+```
+~~~
 https://github.com/ingra14m/Deformable-3D-Gaussians/assets/63096187/ec26d0b9-c126-4e23-b773-dcedcf386f36
-
+~~~
 
 
 ## Acknowledgments
