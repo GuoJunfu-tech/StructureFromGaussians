@@ -1,20 +1,26 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.time_utils import DeformNetwork
+from utils.time_utils import DeformNetwork, MovableNetwork
 import os
 from utils.system_utils import searchForMaxIteration
 from utils.general_utils import get_expon_lr_func
 
 
 class DeformModel:
-    def __init__(self, is_blender=False, is_6dof=False):
-        self.deform = DeformNetwork(is_blender=is_blender, is_6dof=is_6dof).cuda()
+    def __init__(self):
+        # self.deform = DeformNetwork(is_blender=is_blender, is_6dof=is_6dof).cuda()
+        self.movable_factor = MovableNetwork()
         self.optimizer = None
         self.spatial_lr_scale = 5
 
     def step(self, xyz, time_emb):
         return self.deform(xyz, time_emb)
+
+    def deform(self, xyz, p_angle, p_axis, p_point):
+        # TODO get the new_xyz after deformation
+        pass
+        # new_xyz =
 
     def train_setting(self, training_args):
         l = [
