@@ -91,6 +91,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         if iteration > opt.only_train_start_frame_gaussian:
             scene.save(iteration)
             deform.save_weights(args.model_path, iteration)
+            get_images(viewpoint_stack_start_frame, gaussians, pipe, background, d_xyz, d_rotation, d_scaling)
 
             exit()
         else:
@@ -103,16 +104,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
             fid = viewpoint_cam.fid
 
-
-        if iteration < opt.warm_up:
             d_xyz, d_rotation, d_scaling = 0.0, 0.0, 0.0
-        else:
-            N = gaussians.get_xyz.shape[0]
-            time_input = fid.unsqueeze(0).expand(N, -1)
 
-            d_xyz, d_rotation, d_scaling = deform.step(
-                gaussians.get_xyz.detach(), time_input
-            )
+        # if iteration < opt.warm_up:
+        #     d_xyz, d_rotation, d_scaling = 0.0, 0.0, 0.0
+        # else:
+        #     N = gaussians.get_xyz.shape[0]
+        #     time_input = fid.unsqueeze(0).expand(N, -1)
+
+        #     d_xyz, d_rotation, d_scaling = deform.step(
+        #         gaussians.get_xyz.detach(), time_input
+        #     )
 
         # d_xyz, d_rotation, d_scaling = 0.0, 0.0, 0.0
         # Render
@@ -207,10 +209,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                         size_threshold,
                     )
 
-                if iteration % opt.opacity_reset_interval == 0 or (
-                    dataset.white_background and iteration == opt.densify_from_iter
-                ):
-                    gaussians.reset_opacity()
+                # if iteration % opt.opacity_reset_interval == 0 or (
+                #     dataset.white_background and iteration == opt.densify_from_iter
+                # ):
+                #     gaussians.reset_opacity()
 
             # Optimizer step
             if iteration < opt.iterations:
@@ -359,6 +361,33 @@ def training_report(
         torch.cuda.empty_cache()
 
     return test_psnr
+
+def get_images(viewpoint_cams, gaussians, pipe, background, d_xyz, d_rotation, d_scaling):
+    images = []
+    for id, cam in enumerate(viewpoint_cams):
+        render_pkg_re = render(
+            cam,
+            gaussians,
+            pipe,
+            background,
+            d_xyz,
+            d_rotation,
+            d_scaling,
+            False
+        )
+        image, viewspace_point_tensor, visibility_filter, radii = (
+            render_pkg_re["render"],
+            render_pkg_re["viewspace_points"],
+            render_pkg_re["visibility_filter"],
+            render_pkg_re["radii"],
+        )
+        image_np = image.detach().cpu().numpy().transpose((1,2,0))
+
+        from PIL import Image
+        import numpy as np
+        img = Image.fromarray(np.uint8(image_np*255), 'RGB')
+        img.save(f'./rendered_img/{id}.png', format='PNG')
+
 
 
 if __name__ == "__main__":
