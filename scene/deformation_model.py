@@ -5,29 +5,46 @@ from utils.time_utils import DeformNetwork, MovableNetwork
 import os
 from utils.system_utils import searchForMaxIteration
 from utils.general_utils import get_expon_lr_func
+from utils.rotation_utils import RotationOperator
+import math
 
 
 class DeformModel:
-    def __init__(self):
-        # self.deform = DeformNetwork(is_blender=is_blender, is_6dof=is_6dof).cuda()
-        self.movable_factor = MovableNetwork()
+    def __init__(self) -> None:
+        self.optimizer = None
+        self.movable_network = MovableNetwork().cuda()
         self.optimizer = None
         self.spatial_lr_scale = 5
+        self.deform_operator = RotationOperator()
 
-    def step(self, xyz, time_emb):
-        return self.deform(xyz, time_emb)
+    def step(self, gaussians, axis, point_on_axis, theta):
+        return self.deform(gaussians, axis, point_on_axis, theta)
 
-    def deform(self, xyz, p_angle, p_axis, p_point):
-        # TODO get the new_xyz after deformation
-        pass
-        # new_xyz =
+    def deform(self, gaussians, axis, point_on_axis, theta):
+        xyz = gaussians.get_xyz.detach()
+        quaternions = (
+            gaussians.get_rotation.detach()
+        )  # do not transfer the gradients to the original gaussians
+
+        movable_factor = self.movable_network(xyz)
+
+        moved_xyz = self.deform_operator.get_new_location(
+            xyz, axis, point_on_axis, theta
+        )
+        moved_quaternion = self.deform_operator.get_new_quaternion(
+            quaternions, axis, theta * movable_factor
+        )  # return the intermediate quaternion depend on movable_factor
+
+        new_xyz = xyz + movable_factor * (moved_xyz - xyz)
+        new_rotations = moved_quaternion
+        return new_xyz, new_rotations
 
     def train_setting(self, training_args):
         l = [
             {
-                "params": list(self.deform.parameters()),
+                "params": list(self.movable_network.parameters()),
                 "lr": training_args.position_lr_init * self.spatial_lr_scale,
-                "name": "deform",
+                "name": "movable",
             }
         ]
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
@@ -41,20 +58,20 @@ class DeformModel:
 
     def save_weights(self, model_path, iteration):
         out_weights_path = os.path.join(
-            model_path, "deform/iteration_{}".format(iteration)
+            model_path, "movable/iteration_{}".format(iteration)
         )
         os.makedirs(out_weights_path, exist_ok=True)
         torch.save(
-            self.deform.state_dict(), os.path.join(out_weights_path, "deform.pth")
+            self.deform.state_dict(), os.path.join(out_weights_path, "movable.pth")
         )
 
     def load_weights(self, model_path, iteration=-1):
         if iteration == -1:
-            loaded_iter = searchForMaxIteration(os.path.join(model_path, "deform"))
+            loaded_iter = searchForMaxIteration(os.path.join(model_path, "movable"))
         else:
             loaded_iter = iteration
         weights_path = os.path.join(
-            model_path, "deform/iteration_{}/deform.pth".format(loaded_iter)
+            model_path, "movable/iteration_{}/movable.pth".format(loaded_iter)
         )
         self.deform.load_state_dict(torch.load(weights_path))
 

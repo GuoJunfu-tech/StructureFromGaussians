@@ -37,9 +37,9 @@ def render(
     pc: GaussianModel,
     pipe,
     bg_color: torch.Tensor,
-    d_xyz,
-    d_rotation,
-    d_scaling,
+    new_xyz,
+    new_rotations,
+    d_scaling=0.0,
     is_6dof=False,
     scaling_modifier=1.0,
     override_color=None,
@@ -48,6 +48,7 @@ def render(
     Render the scene.
 
     Background tensor (bg_color) must be on GPU!
+    TODO delete d_scaling
     """
 
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
@@ -83,28 +84,30 @@ def render(
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
-    if is_6dof:
-        if torch.is_tensor(d_xyz) is False:
-            means3D = pc.get_xyz
-        else:
-            means3D = from_homogenous(
-                torch.bmm(d_xyz, to_homogenous(pc.get_xyz).unsqueeze(-1)).squeeze(-1)
-            )
-    else:
-        means3D = pc.get_xyz + d_xyz
+    # if is_6dof:
+    #     if torch.is_tensor(d_xyz) is False:
+    #         means3D = pc.get_xyz
+    #     else:
+    #         means3D = from_homogenous(
+    #             torch.bmm(d_xyz, to_homogenous(pc.get_xyz).unsqueeze(-1)).squeeze(-1)
+    #         )
+    # else:
+    #     means3D = pc.get_xyz + d_xyz
+
+    means3D = pc.get_xyz if not new_xyz else new_xyz
     means2D = screenspace_points
     opacity = pc.get_opacity
 
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
     scales = None
-    rotations = None
     cov3D_precomp = None
     if pipe.compute_cov3D_python:
         cov3D_precomp = pc.get_covariance(scaling_modifier)
     else:
         scales = pc.get_scaling + d_scaling
-        rotations = pc.get_rotation + d_rotation
+
+    rotations = pc.get_rotations if not new_rotations else new_rotations
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.

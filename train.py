@@ -21,7 +21,7 @@ import uuid
 
 from utils.loss_utils import l1_loss, ssim, kl_divergence
 from gaussian_renderer import render, network_gui
-from scene import Scene, GaussianModel, DeformModel
+from scene import Scene, GaussianModel, DeformModel, Revolute
 from utils.general_utils import safe_state, get_linear_noise_func
 from utils.image_utils import psnr
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -37,8 +37,11 @@ except ImportError:
 def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
+    # deform = DeformModel(dataset.is_blender, dataset.is_6dof)
     deform = DeformModel(dataset.is_blender, dataset.is_6dof)
     deform.train_setting(opt)
+
+    revolute = Revolute()
 
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
@@ -70,31 +73,28 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
     viewpoint_stack = None
     for iteration in range(1, opt.iterations + 1):
-
         iter_start.record()
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
-        # Pick a random Camera
-        # if not viewpoint_stack:
-        #     viewpoint_stack = (
-        #         scene.getTrainCameras().copy()
-        #     )
-
-        # viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
-
         # if dataset.load2gpu_on_the_fly:
         #     viewpoint_cam.load2device()
         # fid = viewpoint_cam.fid
-        if iteration > opt.only_train_start_frame_gaussian:
+        if iteration == opt.train_deform_net_and_movable_net:
             scene.save(iteration)
             deform.save_weights(args.model_path, iteration)
-            get_images(viewpoint_stack_start_frame, gaussians, pipe, background, d_xyz, d_rotation, d_scaling)
-
+            get_images(
+                viewpoint_stack_end_frame,
+                gaussians,
+                revolute,
+                deform,
+                pipe,
+                background,
+            )
             exit()
-        else:
+        if iteration < opt.only_train_start_frame_gaussian:
             if not viewpoint_stack:
                 viewpoint_stack = viewpoint_stack_start_frame.copy()
 
@@ -102,29 +102,40 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             if dataset.load2gpu_on_the_fly:
                 viewpoint_cam.load2device()
 
-            fid = viewpoint_cam.fid
+            # d_xyz, d_rotation = 0.0, 0.0
+            # fid = viewpoint_cam.fid
+            new_xyz, new_rotations = None, None
 
-            d_xyz, d_rotation, d_scaling = 0.0, 0.0, 0.0
+        if iteration == opt.only_train_start_frame_gaussian:
+            viewpoint_stack = None
 
-        # if iteration < opt.warm_up:
-        #     d_xyz, d_rotation, d_scaling = 0.0, 0.0, 0.0
-        # else:
-        #     N = gaussians.get_xyz.shape[0]
-        #     time_input = fid.unsqueeze(0).expand(N, -1)
+        if (
+            opt.only_train_end_frame_gaussian
+            < iteration
+            < opt.train_deform_param_and_movable_net
+        ):
+            if not viewpoint_stack:
+                viewpoint_stack = viewpoint_stack_end_frame.copy()
 
-        #     d_xyz, d_rotation, d_scaling = deform.step(
-        #         gaussians.get_xyz.detach(), time_input
-        #     )
+            viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
+            if dataset.load2gpu_on_the_fly:
+                viewpoint_cam.load2device()
 
-        # d_xyz, d_rotation, d_scaling = 0.0, 0.0, 0.0
+            # N = gaussians.get_xyz.shape[0]
+
+            new_xyz, new_rotations = deform.step(
+                gaussians, revolute.axis, revolute.pivot, revolute.theta
+            )
+
+        d_scaling = 0.0  # TODO delete all d_scaling
         # Render
         render_pkg_re = render(
             viewpoint_cam,
             gaussians,
             pipe,
             background,
-            d_xyz,
-            d_rotation,
+            new_xyz,
+            new_rotations,
             d_scaling,
             dataset.is_6dof,
         )
@@ -190,7 +201,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 deform.save_weights(args.model_path, iteration)
 
             # Densification
-            if iteration < opt.densify_until_iter:
+            if iteration < opt.only_train_start_frame_gaussian:  # TODO to be changed
                 gaussians.add_densification_stats(
                     viewspace_point_tensor, visibility_filter
                 )
@@ -209,19 +220,25 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                         size_threshold,
                     )
 
+                # TODO find why these
                 # if iteration % opt.opacity_reset_interval == 0 or (
                 #     dataset.white_background and iteration == opt.densify_from_iter
                 # ):
                 #     gaussians.reset_opacity()
 
             # Optimizer step
-            if iteration < opt.iterations:
+            if iteration < opt.only_train_start_frame_gaussian:  # TODO temporary used
                 gaussians.optimizer.step()
                 gaussians.update_learning_rate(iteration)
-                deform.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none=True)
+
+            if opt.only_train_start_frame_gaussian < iteration < opt.iterations:
+                deform.optimizer.step()
                 deform.optimizer.zero_grad()
                 deform.update_learning_rate(iteration)
+
+                revolute.optimizer.step()
+                revolute.optimizer.zero_grad()
 
     print("Best PSNR = {} in Iteration {}".format(best_psnr, best_iteration))
 
@@ -362,32 +379,31 @@ def training_report(
 
     return test_psnr
 
-def get_images(viewpoint_cams, gaussians, pipe, background, d_xyz, d_rotation, d_scaling):
-    images = []
+
+def get_images(
+    viewpoint_cams,
+    gaussians,
+    deformModel,
+    revoluteParams,
+    pipe,
+    background,
+):
+    # images = []
     for id, cam in enumerate(viewpoint_cams):
+        new_xyz, new_rotations = deformModel.step(
+            gaussians, revoluteParams.axis, revoluteParams.pivot, revoluteParams.theta
+        )
         render_pkg_re = render(
-            cam,
-            gaussians,
-            pipe,
-            background,
-            d_xyz,
-            d_rotation,
-            d_scaling,
-            False
+            cam, gaussians, pipe, background, new_xyz, new_rotations, d_scaling, False
         )
-        image, viewspace_point_tensor, visibility_filter, radii = (
-            render_pkg_re["render"],
-            render_pkg_re["viewspace_points"],
-            render_pkg_re["visibility_filter"],
-            render_pkg_re["radii"],
-        )
-        image_np = image.detach().cpu().numpy().transpose((1,2,0))
+        image = render_pkg_re["render"]
+        image_np = image.detach().cpu().numpy().transpose((1, 2, 0))
 
         from PIL import Image
         import numpy as np
-        img = Image.fromarray(np.uint8(image_np*255), 'RGB')
-        img.save(f'./rendered_img/{id}.png', format='PNG')
 
+        img = Image.fromarray(np.uint8(image_np * 255), "RGB")
+        img.save(f"./rendered_img/{id}.png", format="PNG")
 
 
 if __name__ == "__main__":

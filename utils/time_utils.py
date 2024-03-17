@@ -167,7 +167,7 @@ class MovableNetwork(nn.Module):
         self.W = W
         self.input_ch = input_ch
         self.output_ch = output_ch
-        self.t_multires = 6  # if is_blender else 10
+        self.t_multires = 6
         # self.skips = [D // 2]  # FIXME why?
 
         self.embed_time_fn, time_input_ch = get_embedder(self.t_multires, 1)
@@ -176,48 +176,22 @@ class MovableNetwork(nn.Module):
 
         self.time_out = 30
 
-        # self.timenet = nn.Sequential(
-        #     nn.Linear(time_input_ch, 256),
-        #     nn.ReLU(inplace=True),
-        #     nn.Linear(256, self.time_out),
-        # )
-
         self.linear = nn.ModuleList(
             [nn.Linear(xyz_input_ch + self.time_out, W)]
-            + [
-                (
-                    nn.Linear(W, W)
-                    # if i not in self.skips
-                    # else nn.Linear(W + xyz_input_ch + self.time_out, W)
-                )
-                for i in range(D - 1)
-            ]
+            + [(nn.Linear(W, W)) for i in range(D - 1)]
         )
 
-        # self.is_6dof = is_6dof
-
-        # if is_6dof:
-        #     self.branch_w = nn.Linear(W, 3)
-        #     self.branch_v = nn.Linear(W, 3)
-        # else:
-        #     self.gaussian_warp = nn.Linear(W, 3)
-        # self.is_movable = nn.Linear(W, 1)
-        # self.gaussian_scaling = nn.Linear(W, 3)
-
-    def forward(self, x, t):
+    def forward(self, x):
         x_emb = self.embed_fn(x)
         # h = torch.cat([x_emb, t_emb], dim=-1)
         h = x_emb
         for i, l in enumerate(self.linear):
             h = self.linear[i](h)
             h = F.relu(h)
-            # if i in self.skips:
-            #     h = torch.cat([x_emb, t_emb, h], -1)
-
-        # scaling = self.gaussian_scaling(h)
-        # rotation = self.gaussian_rotation(h)
         h = nn.Linear(W, 1)
-        is_movable = F.sigmoid(h)
+        is_movable = F.hardtanh(
+            h
+        )  # TODO maybe try more activate functions with higher gradient
+        is_movable = (1 + is_movable) / 2.0
 
-        # return d_xyz, rotation, scaling
         return is_movable
