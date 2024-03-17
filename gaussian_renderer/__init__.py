@@ -94,7 +94,13 @@ def render(
     # else:
     #     means3D = pc.get_xyz + d_xyz
 
-    means3D = pc.get_xyz if not new_xyz else new_xyz
+    if new_xyz is None:
+        means3D = pc.get_xyz
+    elif isinstance(new_xyz, torch.Tensor):
+        means3D = new_xyz
+    else:
+        raise ValueError("new_xyz must be a tensor or None!")
+
     means2D = screenspace_points
     opacity = pc.get_opacity
 
@@ -107,7 +113,10 @@ def render(
     else:
         scales = pc.get_scaling + d_scaling
 
-    rotations = pc.get_rotations if not new_rotations else new_rotations
+    if new_rotations is None:
+        rotations = pc.get_rotation
+    elif isinstance(new_rotations, torch.Tensor):
+        rotations = new_rotations
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.

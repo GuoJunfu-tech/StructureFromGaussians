@@ -5,7 +5,6 @@ from typing import Union
 
 
 class RotationOperator:
-
     @staticmethod
     def get_rotation_matrix(axis: Union[torch.Tensor, np.ndarray], theta):
         if isinstance(axis, np.ndarray):
@@ -26,8 +25,8 @@ class RotationOperator:
             axis = axis / torch.linalg.norm(axis)  # normalize
             kx, ky, kz = axis[0], axis[1], axis[2]
             cos, sin = torch.cos(theta), torch.sin(theta)
-            one = torch.tensor(1.0, dtype=axis.dtype)
-            R = torch.zeros((3, 3))
+            one = torch.tensor(1.0, dtype=axis.dtype, device="cuda")
+            R = torch.zeros((3, 3), device="cuda")
             R[0, 0] = cos + (kx**2) * (one - cos)
             R[0, 1] = kx * ky * (one - cos) - kz * sin
             R[0, 2] = kx * kz * (one - cos) + ky * sin
@@ -81,6 +80,7 @@ class RotationOperator:
         theta: Union[torch.Tensor, np.ndarray, float],
     ) -> Union[torch.Tensor, np.ndarray]:
         if isinstance(axis, np.ndarray):
+            # FIXME would not work in numpy probably if theta is not 1-dim
             q_rot = np.array(
                 [
                     math.cos(theta / 2),
@@ -90,14 +90,21 @@ class RotationOperator:
                 ]
             )
         elif isinstance(axis, torch.Tensor):
-            q_rot = torch.tensor(
-                [
-                    math.cos(theta / 2),
-                    axis[0] * torch.sin(theta / 2),
-                    axis[1] * torch.sin(theta / 2),
-                    axis[2] * torch.sin(theta / 2),
-                ]
-            )
+            # q_rot = [
+            #        torch.cos(theta / 2),
+            #        axis[0] * torch.sin(theta / 2),
+            #        axis[1] * torch.sin(theta / 2),
+            #        axis[2] * torch.sin(theta / 2),
+            #        ],
+
+            axis = axis.repeat(theta.size(0), 1)
+
+            cos_theta_over_2 = torch.cos(theta / 2)
+            sin_theta_over_2 = torch.sin(theta / 2)
+            sin_theta_over_2 = torch.sin(theta / 2) * axis
+
+            q_rot = torch.cat([cos_theta_over_2, sin_theta_over_2], dim=1)
+
         else:
             raise ValueError(
                 f"Axis must be np or torch matrix, now it is {type(axis)}."

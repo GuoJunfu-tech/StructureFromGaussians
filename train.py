@@ -38,7 +38,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     # deform = DeformModel(dataset.is_blender, dataset.is_6dof)
-    deform = DeformModel(dataset.is_blender, dataset.is_6dof)
+    deform = DeformModel()
     deform.train_setting(opt)
 
     revolute = Revolute()
@@ -82,14 +82,23 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         # if dataset.load2gpu_on_the_fly:
         #     viewpoint_cam.load2device()
         # fid = viewpoint_cam.fid
-        if iteration == opt.train_deform_net_and_movable_net:
+        if iteration == opt.train_deform_param_and_movable_net:
             scene.save(iteration)
-            deform.save_weights(args.model_path, iteration)
+            # deform.save_weights(args.model_path, iteration)
+            print(f"predicted articulated params:")
+            print(
+                f"axis: {revolute.axis.tolist()}\n pivot: {revolute.pivot.tolist()}\n theta: {revolute.theta.item()}"
+            )
+            print(f"movable factors:")
+            with torch.no_grad():
+                factors = deform.movable_network(gaussians.get_xyz)
+                move_parts = factors[factors > 0.8].shape[0]
+                print(move_parts, factors.shape[0])
             get_images(
                 viewpoint_stack_end_frame,
                 gaussians,
-                revolute,
                 deform,
+                revolute,
                 pipe,
                 background,
             )
@@ -108,9 +117,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         if iteration == opt.only_train_start_frame_gaussian:
             viewpoint_stack = None
+            print(f"step 1 is over, now training deformation net")
 
         if (
-            opt.only_train_end_frame_gaussian
+            opt.only_train_start_frame_gaussian
             < iteration
             < opt.train_deform_param_and_movable_net
         ):
@@ -123,6 +133,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
             # N = gaussians.get_xyz.shape[0]
 
+            # deformation
             new_xyz, new_rotations = deform.step(
                 gaussians, revolute.axis, revolute.pivot, revolute.theta
             )
@@ -174,26 +185,26 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 gaussians.max_radii2D[visibility_filter], radii[visibility_filter]
             )
 
-            # Log and save
-            cur_psnr = training_report(
-                tb_writer,
-                iteration,
-                Ll1,
-                loss,
-                l1_loss,
-                iter_start.elapsed_time(iter_end),
-                testing_iterations,
-                scene,
-                render,
-                (pipe, background),
-                deform,
-                dataset.load2gpu_on_the_fly,
-                dataset.is_6dof,
-            )
-            if iteration in testing_iterations:
-                if cur_psnr.item() > best_psnr:
-                    best_psnr = cur_psnr.item()
-                    best_iteration = iteration
+            # Log and save # TODO fix it
+            # cur_psnr = training_report(
+            #     tb_writer,
+            #     iteration,
+            #     Ll1,
+            #     loss,
+            #     l1_loss,
+            #     iter_start.elapsed_time(iter_end),
+            #     testing_iterations,
+            #     scene,
+            #     render,
+            #     (pipe, background),
+            #     deform,
+            #     dataset.load2gpu_on_the_fly,
+            #     dataset.is_6dof,
+            # )
+            # if iteration in testing_iterations:
+            #     if cur_psnr.item() > best_psnr:
+            #         best_psnr = cur_psnr.item()
+            #         best_iteration = iteration
 
             if iteration in saving_iterations:
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
@@ -237,8 +248,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 deform.optimizer.zero_grad()
                 deform.update_learning_rate(iteration)
 
-                revolute.optimizer.step()
-                revolute.optimizer.zero_grad()
+                # revolute.optimizer.step()
+                # revolute.optimizer.zero_grad()
+                # revolute.scheduler.step()
 
     print("Best PSNR = {} in Iteration {}".format(best_psnr, best_iteration))
 
@@ -394,7 +406,7 @@ def get_images(
             gaussians, revoluteParams.axis, revoluteParams.pivot, revoluteParams.theta
         )
         render_pkg_re = render(
-            cam, gaussians, pipe, background, new_xyz, new_rotations, d_scaling, False
+            cam, gaussians, pipe, background, new_xyz, new_rotations, 0.0, False
         )
         image = render_pkg_re["render"]
         image_np = image.detach().cpu().numpy().transpose((1, 2, 0))
@@ -425,7 +437,7 @@ if __name__ == "__main__":
         "--save_iterations",
         nargs="+",
         type=int,
-        default=[7_000, 10_000, 20_000, 30_000, 40000],
+        default=[10_000, 15_000, 20_000, 30_000, 40000],
     )
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(sys.argv[1:])

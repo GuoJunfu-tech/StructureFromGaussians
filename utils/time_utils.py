@@ -155,8 +155,8 @@ class DeformNetwork(nn.Module):
 class MovableNetwork(nn.Module):
     def __init__(
         self,
-        D=8,
-        W=256,
+        D=4,
+        W=128,
         input_ch=3,
         output_ch=59,
         multires=10,
@@ -173,12 +173,12 @@ class MovableNetwork(nn.Module):
         self.embed_time_fn, time_input_ch = get_embedder(self.t_multires, 1)
         self.embed_fn, xyz_input_ch = get_embedder(multires, 3)
         self.input_ch = xyz_input_ch + time_input_ch
+        self.movable_warp = nn.Linear(W, 1)
 
         self.time_out = 30
 
         self.linear = nn.ModuleList(
-            [nn.Linear(xyz_input_ch + self.time_out, W)]
-            + [(nn.Linear(W, W)) for i in range(D - 1)]
+            [nn.Linear(xyz_input_ch, W)] + [(nn.Linear(W, W)) for i in range(D - 1)]
         )
 
     def forward(self, x):
@@ -188,8 +188,9 @@ class MovableNetwork(nn.Module):
         for i, l in enumerate(self.linear):
             h = self.linear[i](h)
             h = F.relu(h)
-        h = nn.Linear(W, 1)
-        is_movable = F.hardtanh(
+
+        h = self.movable_warp(h)
+        is_movable = torch.tanh(
             h
         )  # TODO maybe try more activate functions with higher gradient
         is_movable = (1 + is_movable) / 2.0
