@@ -17,10 +17,12 @@ class DeformModel:
         self.spatial_lr_scale = 5
         self.deform_operator = RotationOperator()
 
-    def step(self, gaussians, axis, point_on_axis, theta):
-        return self.deform(gaussians, axis, point_on_axis, theta)
+    def step(self, gaussians, axis, point_on_axis, theta, is_render=False):
+        return self.deform(gaussians, axis, point_on_axis, theta, is_render)
 
-    def deform(self, gaussians, axis, point_on_axis, theta):
+    def deform(
+        self, gaussians, axis, point_on_axis, theta, is_render=False, factor=None
+    ):
         xyz = gaussians.get_xyz.detach()
         quaternions = (
             gaussians.get_rotation.detach()
@@ -28,14 +30,19 @@ class DeformModel:
 
         movable_factor = self.movable_network(xyz)
 
-        moved_xyz = self.deform_operator.get_new_location(
-            xyz, axis, point_on_axis, theta
+        # if is_render:
+        #     movable_factor = (movable_factor > 1e-3).float()
+
+        axis = axis / torch.linalg.norm(axis)
+        new_xyz = self.deform_operator.get_new_location(
+            xyz, axis, point_on_axis, theta * movable_factor
         )
+
         moved_quaternion = self.deform_operator.get_new_quaternion(
             quaternions, axis, theta * movable_factor
         )  # return the intermediate quaternion depend on movable_factor
 
-        new_xyz = xyz + movable_factor * (moved_xyz - xyz)
+        # new_xyz = xyz + movable_factor * (moved_xyz - xyz)
         new_rotations = moved_quaternion
         return new_xyz, new_rotations
 
@@ -47,7 +54,7 @@ class DeformModel:
                 "name": "movable",
             }
         ]
-        self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
+        self.optimizer = torch.optim.Adam(l, lr=0.0, eps=2e-15)
 
         self.deform_scheduler_args = get_expon_lr_func(
             lr_init=training_args.position_lr_init * self.spatial_lr_scale,

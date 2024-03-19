@@ -71,8 +71,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         lr_init=0.1, lr_final=1e-15, lr_delay_mult=0.01, max_steps=20000
     )
 
+    import dill as pickle
+
+    with open("first_frame_gaussian.pkl", "rb") as f:
+        gaussians = pickle.load(f)
+
     viewpoint_stack = None
-    for iteration in range(1, opt.iterations + 1):
+    for iteration in range(opt.only_train_start_frame_gaussian, opt.iterations + 1):
         iter_start.record()
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
@@ -82,6 +87,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         # if dataset.load2gpu_on_the_fly:
         #     viewpoint_cam.load2device()
         # fid = viewpoint_cam.fid
+        # if iteration == 2000:
+        #     import dill as pickle
+
+        #     with open("first_frame_gaussian.pkl", "wb") as f:
+        #         pickle.dump(gaussians, f)
+        #         exit()
+
         if iteration == opt.train_deform_param_and_movable_net:
             scene.save(iteration)
             # deform.save_weights(args.model_path, iteration)
@@ -102,6 +114,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 pipe,
                 background,
             )
+            # import dill as pickle
+
+            # data = {"factors": factors, "xyz": gaussians.get_xyz}
+            # with open("factor_xyz.pkl", "wb") as f:
+            #     pickle.dump(data, f)
+
             exit()
         if iteration < opt.only_train_start_frame_gaussian:
             if not viewpoint_stack:
@@ -120,7 +138,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             print(f"step 1 is over, now training deformation net")
 
         if (
-            opt.only_train_start_frame_gaussian
+            opt.only_train_start_frame_gaussian - 1
             < iteration
             < opt.train_deform_param_and_movable_net
         ):
@@ -248,9 +266,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 deform.optimizer.zero_grad()
                 deform.update_learning_rate(iteration)
 
-                # revolute.optimizer.step()
-                # revolute.optimizer.zero_grad()
-                # revolute.scheduler.step()
+                revolute.optimizer.step()
+                revolute.optimizer.zero_grad()
+                revolute.scheduler.step()
 
     print("Best PSNR = {} in Iteration {}".format(best_psnr, best_iteration))
 
@@ -403,7 +421,11 @@ def get_images(
     # images = []
     for id, cam in enumerate(viewpoint_cams):
         new_xyz, new_rotations = deformModel.step(
-            gaussians, revoluteParams.axis, revoluteParams.pivot, revoluteParams.theta
+            gaussians,
+            revoluteParams.axis,
+            revoluteParams.pivot,
+            revoluteParams.theta,
+            is_render=True,
         )
         render_pkg_re = render(
             cam, gaussians, pipe, background, new_xyz, new_rotations, 0.0, False

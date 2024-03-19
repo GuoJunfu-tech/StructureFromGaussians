@@ -6,36 +6,54 @@ from typing import Union
 
 class RotationOperator:
     @staticmethod
-    def get_rotation_matrix(axis: Union[torch.Tensor, np.ndarray], theta):
-        if isinstance(axis, np.ndarray):
-            axis = axis / np.linalg.norm(axis)  # normalize
-            kx, ky, kz = axis[0], axis[1], axis[2]
-            cos, sin = np.cos(theta), np.sin(theta)
-            R = np.zeros((3, 3))
-            R[0, 0] = cos + (kx**2) * (1 - cos)
-            R[0, 1] = kx * ky * (1 - cos) - kz * sin
-            R[0, 2] = kx * kz * (1 - cos) + ky * sin
-            R[1, 0] = kx * ky * (1 - cos) + kz * sin
-            R[1, 1] = cos + (ky**2) * (1 - cos)
-            R[1, 2] = ky * kz * (1 - cos) - kx * sin
-            R[2, 0] = kx * kz * (1 - cos) - ky * sin
-            R[2, 1] = ky * kz * (1 - cos) + kx * sin
-            R[2, 2] = cos + (kz**2) * (1 - cos)
-        elif isinstance(axis, torch.Tensor):
+    def get_rotation_matrix(axis: torch.Tensor, theta: torch.Tensor):
+        if isinstance(axis, torch.Tensor):
             axis = axis / torch.linalg.norm(axis)  # normalize
-            kx, ky, kz = axis[0], axis[1], axis[2]
-            cos, sin = torch.cos(theta), torch.sin(theta)
-            one = torch.tensor(1.0, dtype=axis.dtype, device="cuda")
-            R = torch.zeros((3, 3), device="cuda")
-            R[0, 0] = cos + (kx**2) * (one - cos)
-            R[0, 1] = kx * ky * (one - cos) - kz * sin
-            R[0, 2] = kx * kz * (one - cos) + ky * sin
-            R[1, 0] = kx * ky * (one - cos) + kz * sin
-            R[1, 1] = cos + (ky**2) * (one - cos)
-            R[1, 2] = ky * kz * (one - cos) - kx * sin
-            R[2, 0] = kx * kz * (one - cos) - ky * sin
-            R[2, 1] = ky * kz * (one - cos) + kx * sin
-            R[2, 2] = cos + (kz**2) * (one - cos)
+            # axis = axis.unsqueeze(0).repeat(theta.size(0), 1)
+            # kx, ky, kz = axis[:, 0], axis[:, 1], axis[:, 2]
+            kx, ky, kz = axis
+
+            if theta.numel() == 1:
+                cos, sin = torch.cos(theta), torch.sin(theta)
+                one = torch.tensor(1.0, dtype=axis.dtype, device=axis.device).expand_as(
+                    cos
+                )
+
+                R = torch.zeros(3, 3, device=axis.device)
+
+                R[0, 0] = cos.squeeze() + (kx**2) * (one - cos).squeeze()
+                R[0, 1] = kx * ky * (one - cos).squeeze() - kz * sin.squeeze()
+                R[0, 2] = kx * kz * (one - cos).squeeze() + ky * sin.squeeze()
+                R[1, 0] = kx * ky * (one - cos).squeeze() + kz * sin.squeeze()
+                R[1, 1] = cos.squeeze() + (ky**2) * (one - cos).squeeze()
+                R[1, 2] = ky * kz * (one - cos).squeeze() - kx * sin.squeeze()
+                R[2, 0] = kx * kz * (one - cos).squeeze() - ky * sin.squeeze()
+                R[2, 1] = ky * kz * (one - cos).squeeze() + kx * sin.squeeze()
+                R[2, 2] = cos.squeeze() + (kz**2) * (one - cos).squeeze()
+            else:
+                cos = torch.cos(theta).squeeze()  # Nx1 -> N
+                sin = torch.sin(theta).squeeze()  # Nx1 -> N
+
+                # one = torch.ones_like(cos)  # N
+                one = torch.tensor(1.0, dtype=axis.dtype, device=axis.device).expand_as(
+                    cos
+                )
+
+                # Initialize the rotation matrices batch
+                R = torch.zeros(
+                    theta.size(0), 3, 3, device=axis.device, dtype=axis.dtype
+                )
+
+                # Fill in each matrix
+                R[:, 0, 0] = cos + (kx**2) * (one - cos)
+                R[:, 0, 1] = kx * ky * (one - cos) - kz * sin
+                R[:, 0, 2] = kx * kz * (one - cos) + ky * sin
+                R[:, 1, 0] = kx * ky * (one - cos) + kz * sin
+                R[:, 1, 1] = cos + (ky**2) * (one - cos)
+                R[:, 1, 2] = ky * kz * (one - cos) - kx * sin
+                R[:, 2, 0] = kx * kz * (one - cos) - ky * sin
+                R[:, 2, 1] = ky * kz * (one - cos) + kx * sin
+                R[:, 2, 2] = cos + (kz**2) * (one - cos)
         else:
             raise ValueError(
                 f"axis and theta should be numpy or torch matrix, now it is {type(axis)}"
@@ -58,59 +76,66 @@ class RotationOperator:
         """
         # x = np.asarray(x)
         if isinstance(x, np.ndarray):
-            p_local = np.transpose(x - pivot_point)
+            x_local = np.transpose(x - pivot_point)
             R = self.get_rotation_matrix(axis, theta)
-            p_local_rotated = R.dot(p_local)
-            x_new = np.transpose(p_local_rotated) + pivot_point
+            x_local_rotated = R.dot(x_local)
+            x_new = np.transpose(x_local_rotated) + pivot_point
         elif isinstance(x, torch.Tensor):
-            p_local = torch.transpose(x - pivot_point, 0, 1)
+            # p_local = torch.transpose(x - pivot_point, 0, 1)
+            x_local = x - pivot_point
             R = self.get_rotation_matrix(axis, theta)
+            R_expand = R.unsqueeze(0)
+            x_expand = x.unsqueeze(-1)
             # p_local_rotated = R.dot(p_local)
-            p_local_rotated = torch.mm(R, p_local)
-            x_new = torch.transpose(p_local_rotated, 0, 1) + pivot_point
+            x_local_rotated = torch.matmul(R_expand, x_expand).squeeze(-1)
+            # x_new = torch.transpose(p_local_rotated, 0, 1) + pivot_point
+            x_new = (x_local_rotated + pivot_point).squeeze()
         else:
             raise ValueError("x must be a numpy matrix or torch matrix!")
 
         return x_new
 
     def get_new_quaternion(
-        self,
-        q: Union[torch.Tensor, np.ndarray],
-        axis: Union[torch.Tensor, np.ndarray],
-        theta: Union[torch.Tensor, np.ndarray, float],
-    ) -> Union[torch.Tensor, np.ndarray]:
-        if isinstance(axis, np.ndarray):
-            # FIXME would not work in numpy probably if theta is not 1-dim
-            q_rot = np.array(
+        self, q: torch.Tensor, axis: torch.Tensor, theta: torch.Tensor
+    ) -> torch.Tensor:
+        assert abs(torch.linalg.norm(axis) - 1) < 1e-2
+        if theta.numel() == 1:
+            q_rot = torch.tensor(
                 [
-                    math.cos(theta / 2),
-                    axis[0] * math.sin(theta / 2),
-                    axis[1] * math.sin(theta / 2),
-                    axis[2] * math.sin(theta / 2),
+                    torch.cos(theta / 2),
+                    axis[0] * torch.sin(theta / 2),
+                    axis[1] * torch.sin(theta / 2),
+                    axis[2] * torch.sin(theta / 2),
                 ]
             )
-        elif isinstance(axis, torch.Tensor):
-            # q_rot = [
-            #        torch.cos(theta / 2),
-            #        axis[0] * torch.sin(theta / 2),
-            #        axis[1] * torch.sin(theta / 2),
-            #        axis[2] * torch.sin(theta / 2),
-            #        ],
-
-            axis = axis.repeat(theta.size(0), 1)
-
-            cos_theta_over_2 = torch.cos(theta / 2)
-            sin_theta_over_2 = torch.sin(theta / 2)
-            sin_theta_over_2 = torch.sin(theta / 2) * axis
-
-            q_rot = torch.cat([cos_theta_over_2, sin_theta_over_2], dim=1)
-
+            q_rot = q_rot.unsqueeze(0).expand(q.size(0), -1)
         else:
-            raise ValueError(
-                f"Axis must be np or torch matrix, now it is {type(axis)}."
-            )
+            # Since theta is Nx1, these operations are broadcasted to each theta
+            q_rot = torch.stack(
+                [
+                    torch.cos(theta / 2).squeeze(-1),
+                    axis[0]
+                    * torch.sin(theta / 2).squeeze(),  # Sine components need squeezing
+                    axis[1] * torch.sin(theta / 2).squeeze(),
+                    axis[2] * torch.sin(theta / 2).squeeze(),
+                ],
+                dim=-1,
+            )  # Stack along dim=-1 to form the quaternion
 
-        return q_rot * q
+            # Quaternion multiplication (element-wise for batches)
+        w1, x1, y1, z1 = q.unbind(-1)
+        w2, x2, y2, z2 = q_rot.unbind(-1)
+
+        w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+        x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+        y = w1 * y2 + y1 * w2 + z1 * x2 - x1 * z2
+        z = w1 * z2 + z1 * w2 + x1 * y2 - y1 * x2
+
+        # Form the new quaternion and normalize it
+        q_new = torch.stack([w, x, y, z], dim=-1)
+        q_new = q_new / torch.linalg.norm(q_new, dim=1, keepdim=True)
+
+        return q_new
 
 
 if __name__ == "__main__":
@@ -118,4 +143,16 @@ if __name__ == "__main__":
     pivot = np.array([0, 0, 0])
     theta = math.pi / 2
 
-    print(RotationOperator.get_rotation_matrix(axis, theta))
+    # test quaternion_update function
+    N = 5  # Batch size
+    q = torch.rand(
+        N, 4
+    )  # Batch of quaternions, assuming the first component is the scalar part
+    axis = torch.rand(N, 3)  # Batch of rotation axes
+    axis = axis / torch.norm(axis, dim=1, keepdim=True)
+    theta = 0.5  # Rotation angle in radians
+
+    rotate = RotationOperator()
+    q_updated = rotate.get_new_quaternion(q, axis, theta)
+
+    print(q_updated)

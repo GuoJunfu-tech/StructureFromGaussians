@@ -103,7 +103,7 @@ class OptimizationParams(ParamGroup):
 
         self.only_train_start_frame_gaussian = 2_000
         self.train_deform_param_and_movable_net = 5_300
-        self.only_train_end_frame_gaussian = 8_000
+        self.only_train_end_frame_gaussian = 18_000
         super().__init__(parser, "Optimization Parameters")
 
 
