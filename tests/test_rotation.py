@@ -24,20 +24,39 @@ def test_rotation_operator():
 
         rotate_interval = 2 * math.pi / intervals
         theta = torch.tensor(rotate_interval, dtype=torch.float32)
-        q_origin = q.clone()
-        xyz_origin = xyz.clone()
-        for i in range(intervals):
-            new_xyz = rotate.get_new_location(xyz, axis, pivot, theta)
 
+        theta_matrix = theta.expand(bn, 1)
+        q_origin = q.clone()
+        q_matrix = q.clone()
+        xyz_origin = xyz.clone()
+        xyz_matrix = xyz.clone()
+        for i in range(intervals):
+            # print(f"xyz: {xyz}")
+            # print(f"xyz_matrix: {xyz_matrix}")
+            xyz = rotate.get_new_location(xyz, axis, pivot, theta)
             q = rotate.get_new_quaternion(q, axis, theta)
 
-        # test
-        diff_q_p = (q_origin - q).sum().item()
-        diff_q_n = (q_origin + q).sum().item()
-        diff_xyz = (xyz_origin - new_xyz).sum().item()
+            xyz_matrix = rotate.get_new_location(xyz_matrix, axis, pivot, theta_matrix)
+            q_matrix = rotate.get_new_quaternion(q_matrix, axis, theta_matrix)
 
-        assert diff_q_p <= 1e-2 or diff_q_n <= 1e-2
-        assert diff_xyz <= 1e-2
+        # test
+        tolerance = 1e-5
+        diff_q_p = (q_origin - q).max().item()
+        diff_q_n = (q_origin + q).max().item()
+        diff_xyz = (xyz_origin - xyz).max().item()
+
+        diff_q_p_theta_is_matrix = (q_origin - q_matrix).max().item()
+        diff_q_n_theta_is_matrix = (q_origin + q_matrix).max().item()
+        diff_xyz_theta_is_matrix = (xyz_origin - xyz_matrix).max().item()
+
+        assert diff_q_p <= tolerance or diff_q_n <= tolerance
+        assert diff_xyz <= tolerance
+
+        assert (
+            diff_q_p_theta_is_matrix <= tolerance
+            or diff_q_n_theta_is_matrix <= tolerance
+        )
+        assert diff_xyz_theta_is_matrix <= tolerance
 
 
 if __name__ == "__main__":

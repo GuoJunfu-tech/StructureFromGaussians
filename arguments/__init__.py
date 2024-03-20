@@ -102,7 +102,7 @@ class OptimizationParams(ParamGroup):
         self.densify_grad_threshold = 0.0002
 
         self.only_train_start_frame_gaussian = 2_000
-        self.train_deform_param_and_movable_net = 5_300
+        self.train_deform_param_and_movable_net = 8_300
         self.only_train_end_frame_gaussian = 18_000
         super().__init__(parser, "Optimization Parameters")
 

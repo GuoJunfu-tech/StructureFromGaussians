@@ -7,57 +7,44 @@ from typing import Union
 class RotationOperator:
     @staticmethod
     def get_rotation_matrix(axis: torch.Tensor, theta: torch.Tensor):
-        if isinstance(axis, torch.Tensor):
-            axis = axis / torch.linalg.norm(axis)  # normalize
-            # axis = axis.unsqueeze(0).repeat(theta.size(0), 1)
-            # kx, ky, kz = axis[:, 0], axis[:, 1], axis[:, 2]
-            kx, ky, kz = axis
+        axis = axis / torch.linalg.norm(axis)  # normalize
+        kx, ky, kz = axis
 
-            if theta.numel() == 1:
-                cos, sin = torch.cos(theta), torch.sin(theta)
-                one = torch.tensor(1.0, dtype=axis.dtype, device=axis.device).expand_as(
-                    cos
-                )
+        if theta.numel() == 1:
+            cos, sin = torch.cos(theta), torch.sin(theta)
+            one = torch.tensor(1.0, dtype=axis.dtype, device=axis.device).expand_as(cos)
 
-                R = torch.zeros(3, 3, device=axis.device)
+            R = torch.zeros(3, 3, device=axis.device)
 
-                R[0, 0] = cos.squeeze() + (kx**2) * (one - cos).squeeze()
-                R[0, 1] = kx * ky * (one - cos).squeeze() - kz * sin.squeeze()
-                R[0, 2] = kx * kz * (one - cos).squeeze() + ky * sin.squeeze()
-                R[1, 0] = kx * ky * (one - cos).squeeze() + kz * sin.squeeze()
-                R[1, 1] = cos.squeeze() + (ky**2) * (one - cos).squeeze()
-                R[1, 2] = ky * kz * (one - cos).squeeze() - kx * sin.squeeze()
-                R[2, 0] = kx * kz * (one - cos).squeeze() - ky * sin.squeeze()
-                R[2, 1] = ky * kz * (one - cos).squeeze() + kx * sin.squeeze()
-                R[2, 2] = cos.squeeze() + (kz**2) * (one - cos).squeeze()
-            else:
-                cos = torch.cos(theta).squeeze()  # Nx1 -> N
-                sin = torch.sin(theta).squeeze()  # Nx1 -> N
-
-                # one = torch.ones_like(cos)  # N
-                one = torch.tensor(1.0, dtype=axis.dtype, device=axis.device).expand_as(
-                    cos
-                )
-
-                # Initialize the rotation matrices batch
-                R = torch.zeros(
-                    theta.size(0), 3, 3, device=axis.device, dtype=axis.dtype
-                )
-
-                # Fill in each matrix
-                R[:, 0, 0] = cos + (kx**2) * (one - cos)
-                R[:, 0, 1] = kx * ky * (one - cos) - kz * sin
-                R[:, 0, 2] = kx * kz * (one - cos) + ky * sin
-                R[:, 1, 0] = kx * ky * (one - cos) + kz * sin
-                R[:, 1, 1] = cos + (ky**2) * (one - cos)
-                R[:, 1, 2] = ky * kz * (one - cos) - kx * sin
-                R[:, 2, 0] = kx * kz * (one - cos) - ky * sin
-                R[:, 2, 1] = ky * kz * (one - cos) + kx * sin
-                R[:, 2, 2] = cos + (kz**2) * (one - cos)
+            R[0, 0] = cos.squeeze() + (kx**2) * (one - cos).squeeze()
+            R[0, 1] = kx * ky * (one - cos).squeeze() - kz * sin.squeeze()
+            R[0, 2] = kx * kz * (one - cos).squeeze() + ky * sin.squeeze()
+            R[1, 0] = kx * ky * (one - cos).squeeze() + kz * sin.squeeze()
+            R[1, 1] = cos.squeeze() + (ky**2) * (one - cos).squeeze()
+            R[1, 2] = ky * kz * (one - cos).squeeze() - kx * sin.squeeze()
+            R[2, 0] = kx * kz * (one - cos).squeeze() - ky * sin.squeeze()
+            R[2, 1] = ky * kz * (one - cos).squeeze() + kx * sin.squeeze()
+            R[2, 2] = cos.squeeze() + (kz**2) * (one - cos).squeeze()
         else:
-            raise ValueError(
-                f"axis and theta should be numpy or torch matrix, now it is {type(axis)}"
-            )
+            cos = torch.cos(theta).squeeze()  # Nx1 -> N
+            sin = torch.sin(theta).squeeze()  # Nx1 -> N
+
+            one = torch.ones_like(cos)  # N
+            # one = torch.tensor(1.0, dtype=axis.dtype, device=axis.device).expand_as(cos)
+
+            # Initialize the rotation matrices batch
+            R = torch.zeros(theta.size(0), 3, 3, device=axis.device, dtype=axis.dtype)
+
+            # Fill in each matrix
+            R[:, 0, 0] = cos + (kx**2) * (one - cos)
+            R[:, 0, 1] = kx * ky * (one - cos) - kz * sin
+            R[:, 0, 2] = kx * kz * (one - cos) + ky * sin
+            R[:, 1, 0] = kx * ky * (one - cos) + kz * sin
+            R[:, 1, 1] = cos + (ky**2) * (one - cos)
+            R[:, 1, 2] = ky * kz * (one - cos) - kx * sin
+            R[:, 2, 0] = kx * kz * (one - cos) - ky * sin
+            R[:, 2, 1] = ky * kz * (one - cos) + kx * sin
+            R[:, 2, 2] = cos + (kz**2) * (one - cos)
 
         return R
 
@@ -75,23 +62,20 @@ class RotationOperator:
         A numpy array representing the new location of the point.
         """
         # x = np.asarray(x)
-        if isinstance(x, np.ndarray):
-            x_local = np.transpose(x - pivot_point)
-            R = self.get_rotation_matrix(axis, theta)
-            x_local_rotated = R.dot(x_local)
-            x_new = np.transpose(x_local_rotated) + pivot_point
-        elif isinstance(x, torch.Tensor):
-            # p_local = torch.transpose(x - pivot_point, 0, 1)
-            x_local = x - pivot_point
-            R = self.get_rotation_matrix(axis, theta)
-            R_expand = R.unsqueeze(0)
-            x_expand = x.unsqueeze(-1)
+        # p_local = torch.transpose(x - pivot_point, 0, 1)
+        assert abs(torch.linalg.norm(axis) - 1) < 1e-2
+        x_local = x - pivot_point
+        R = self.get_rotation_matrix(axis, theta)
+        if theta.numel() == 1:
+            R = R.unsqueeze(0)
+            x_expand = x_local.unsqueeze(-1)
             # p_local_rotated = R.dot(p_local)
-            x_local_rotated = torch.matmul(R_expand, x_expand).squeeze(-1)
+            x_local_rotated = torch.matmul(R, x_expand).squeeze(-1)
             # x_new = torch.transpose(p_local_rotated, 0, 1) + pivot_point
             x_new = (x_local_rotated + pivot_point).squeeze()
         else:
-            raise ValueError("x must be a numpy matrix or torch matrix!")
+            x_local_rotated = torch.matmul(R, x_local.unsqueeze(-1)).squeeze(-1)
+            x_new = x_local_rotated + pivot_point
 
         return x_new
 
@@ -122,7 +106,6 @@ class RotationOperator:
                 dim=-1,
             )  # Stack along dim=-1 to form the quaternion
 
-            # Quaternion multiplication (element-wise for batches)
         w1, x1, y1, z1 = q.unbind(-1)
         w2, x2, y2, z2 = q_rot.unbind(-1)
 

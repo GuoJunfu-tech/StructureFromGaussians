@@ -6,19 +6,19 @@ class Revolute:
     def __init__(self) -> None:
         # Initial
         self.axis = torch.tensor(
-            [0, 1, 0],
+            [1, 0, 0],
             dtype=torch.float32,
             requires_grad=True,
             device="cuda",
         )
         self.pivot = torch.tensor(
-            [0, 0, 0],
+            [0.7294, 0.1751, -0.1518],
             dtype=torch.float32,
             requires_grad=True,
             device="cuda",
         )
         self.theta = torch.tensor(
-            [math.pi / 2],
+            [-1.8222],
             dtype=torch.float32,
             requires_grad=True,
             device="cuda",

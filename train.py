@@ -116,7 +116,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             )
             # import dill as pickle
 
-            # data = {"factors": factors, "xyz": gaussians.get_xyz}
+            # data = {"factors": factors, "gaussians": gaussians, "revolute": revolute}
             # with open("factor_xyz.pkl", "wb") as f:
             #     pickle.dump(data, f)
 
@@ -266,9 +266,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 deform.optimizer.zero_grad()
                 deform.update_learning_rate(iteration)
 
-                revolute.optimizer.step()
-                revolute.optimizer.zero_grad()
-                revolute.scheduler.step()
+                # revolute.optimizer.step()
+                # revolute.optimizer.zero_grad()
+                # revolute.scheduler.step()
 
     print("Best PSNR = {} in Iteration {}".format(best_psnr, best_iteration))
 

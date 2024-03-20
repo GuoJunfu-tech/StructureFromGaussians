@@ -194,6 +194,6 @@ class MovableNetwork(nn.Module):
         #     h * 0.1
         # )  # TODO maybe try more activate functions with higher gradient
         # is_movable = (1 + is_movable) / 2.0
-        is_movable = torch.sigmoid(h * 0.1)
+        is_movable = torch.sigmoid(0.01 * h)
 
         return is_movable

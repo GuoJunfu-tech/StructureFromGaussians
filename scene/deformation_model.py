@@ -28,7 +28,10 @@ class DeformModel:
             gaussians.get_rotation.detach()
         )  # do not transfer the gradients to the original gaussians
 
-        movable_factor = self.movable_network(xyz)
+        if factor is not None:
+            movable_factor = factor
+        else:
+            movable_factor = self.movable_network(xyz)
 
         # if is_render:
         #     movable_factor = (movable_factor > 1e-3).float()
