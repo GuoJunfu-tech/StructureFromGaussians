@@ -10,3 +10,4 @@ screenshots
 data
 submodules
 rendered_img
+*.pkl
