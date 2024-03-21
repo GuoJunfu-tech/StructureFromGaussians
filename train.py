@@ -19,7 +19,8 @@ import torch
 from tqdm import tqdm
 import uuid
 
-from utils.loss_utils import l1_loss, ssim, kl_divergence
+from utils.loss_utils import l1_loss, ssim, kl_divergence, chamfer_distance_loss
+from utils.general_utils import farthest_point_sampling
 from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel, DeformModel, Revolute
 from utils.general_utils import safe_state, get_linear_noise_func
@@ -71,21 +72,28 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         lr_init=0.1, lr_final=1e-15, lr_delay_mult=0.01, max_steps=20000
     )
 
+    # load gaussians
     import dill as pickle
 
-    with open("first_frame_gaussian.pkl", "rb") as f:
+    with open("./load_data/first_frame_gaussian.pkl", "rb") as f:
         gaussians = pickle.load(f)
+    with open("./load_data/end_frame_gaussian.pkl", "rb") as f:
+        end_frame_gaussians = pickle.load(f)
+
+    gt_xyz = farthest_point_sampling(
+        end_frame_gaussians["gaussians"].get_xyz.detach(), 1000
+    )
 
     viewpoint_stack = None
-    for iteration in range(opt.only_train_start_frame_gaussian, opt.iterations + 1):
+    for iteration in range(1 + opt.only_train_start_frame_gaussian, opt.iterations + 1):
         iter_start.record()
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
-        # if dataset.load2gpu_on_the_fly:
-        #     viewpoint_cam.load2device()
+        if dataset.load2gpu_on_the_fly:
+            viewpoint_cam.load2device()
         # fid = viewpoint_cam.fid
         # if iteration == 2000:
         #     import dill as pickle
@@ -105,7 +113,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             with torch.no_grad():
                 factors = deform.movable_network(gaussians.get_xyz)
                 move_parts = factors[factors > 0.8].shape[0]
-                print(move_parts, factors.shape[0])
+                unmove_parts = factors[factors < 0.2].shape[0]
+                print(
+                    f"move_parts: {move_parts}, unmove parts: {unmove_parts}, factors: {factors.shape[0]}"
+                )
             get_images(
                 viewpoint_stack_end_frame,
                 gaussians,
@@ -116,8 +127,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             )
             # import dill as pickle
 
-            # data = {"factors": factors, "gaussians": gaussians, "revolute": revolute}
-            # with open("factor_xyz.pkl", "wb") as f:
+            # data = {"gaussians": gaussians}
+            # with open("end_frame_gaussians.pkl", "wb") as f:
             #     pickle.dump(data, f)
 
             exit()
@@ -138,7 +149,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             print(f"step 1 is over, now training deformation net")
 
         if (
-            opt.only_train_start_frame_gaussian - 1
+            opt.only_train_start_frame_gaussian
             < iteration
             < opt.train_deform_param_and_movable_net
         ):
@@ -179,9 +190,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-            1.0 - ssim(image, gt_image)
-        )
+
+        cd_loss = chamfer_distance_loss(new_xyz, gt_xyz)
+        # loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
+        #     1.0 - ssim(image, gt_image)
+        # )
+        # loss = loss + cd_loss
+        loss = cd_loss
+
         loss.backward()
 
         iter_end.record()
@@ -193,7 +209,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+                progress_bar.set_postfix(
+                    {"Loss": f"{ema_loss_for_log:.{7}f}", "cd_loss": f"{cd_loss:.{7}f}"}
+                )
                 progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()
@@ -203,31 +221,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 gaussians.max_radii2D[visibility_filter], radii[visibility_filter]
             )
 
-            # Log and save # TODO fix it
-            # cur_psnr = training_report(
-            #     tb_writer,
-            #     iteration,
-            #     Ll1,
-            #     loss,
-            #     l1_loss,
-            #     iter_start.elapsed_time(iter_end),
-            #     testing_iterations,
-            #     scene,
-            #     render,
-            #     (pipe, background),
-            #     deform,
-            #     dataset.load2gpu_on_the_fly,
-            #     dataset.is_6dof,
-            # )
-            # if iteration in testing_iterations:
-            #     if cur_psnr.item() > best_psnr:
-            #         best_psnr = cur_psnr.item()
-            #         best_iteration = iteration
-
-            if iteration in saving_iterations:
-                print("\n[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration)
-                deform.save_weights(args.model_path, iteration)
+            # if iteration in saving_iterations:
+            #     print("\n[ITER {}] Saving Gaussians".format(iteration))
+            #     scene.save(iteration)
+            #     deform.save_weights(args.model_path, iteration)
 
             # Densification
             if iteration < opt.only_train_start_frame_gaussian:  # TODO to be changed
@@ -266,9 +263,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 deform.optimizer.zero_grad()
                 deform.update_learning_rate(iteration)
 
-                # revolute.optimizer.step()
-                # revolute.optimizer.zero_grad()
-                # revolute.scheduler.step()
+                revolute.optimizer.step()
+                revolute.optimizer.zero_grad()
+                revolute.scheduler.step()
 
     print("Best PSNR = {} in Iteration {}".format(best_psnr, best_iteration))
 
@@ -459,7 +456,7 @@ if __name__ == "__main__":
         "--save_iterations",
         nargs="+",
         type=int,
-        default=[10_000, 15_000, 20_000, 30_000, 40000],
+        default=[15_000, 20_000, 30_000, 40000],
     )
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(sys.argv[1:])

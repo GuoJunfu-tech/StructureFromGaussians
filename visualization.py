@@ -7,6 +7,8 @@ import sys
 import math
 from argparse import ArgumentParser, Namespace
 from gaussian_renderer import render, network_gui
+from utils.loss_utils import l1_loss, ssim, chamfer_distance_loss
+from utils.general_utils import farthest_point_sampling
 
 
 def visualize():
@@ -72,7 +74,7 @@ if __name__ == "__main__":
         else:
             viewpoint_stack_end_frame.append(viewpoint_cam)
 
-    with open("factor_xyz.pkl", "rb") as f:
+    with open("./load_data/factor_xyz.pkl", "rb") as f:
         data = pickle.load(f)
 
     factor = data["factors"].detach()
@@ -102,6 +104,12 @@ if __name__ == "__main__":
     # num = factor.sum().item()
     # print(f"{factor}, {num}/{factor.shape[0]}")
 
+    with open("./load_data/end_frame_gaussian.pkl", "rb") as f:
+        end_frame_gaussians = pickle.load(f)
+
+    gt_xyz = farthest_point_sampling(
+        end_frame_gaussians["gaussians"].get_xyz.detach(), 10000
+    )
     for id, cam in enumerate(viewpoint_stack_end_frame):
         new_xyz, new_rotations = deform.deform(
             gaussians,
@@ -121,6 +129,18 @@ if __name__ == "__main__":
             d_scaling=0.0,
         )
         image = render_pkg_re["render"]
+
+        # Loss
+        gt_image = cam.original_image.cuda()
+        Ll1 = l1_loss(image, gt_image)
+
+        cd_loss = chamfer_distance_loss(new_xyz, gt_xyz)
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
+            1.0 - ssim(image, gt_image)  # + chamfer_distance_loss(new_xyz, gt_xyz)
+        )
+        loss = loss + cd_loss
+        print(f"#{id} camera with cd: {cd_loss} and total loss: {loss}")
+
         image_np = image.detach().cpu().numpy().transpose((1, 2, 0))
 
         from PIL import Image

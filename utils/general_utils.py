@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -40,7 +40,7 @@ def ArrayToTorch(array, resolution):
 
 
 def get_expon_lr_func(
-        lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000
+    lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000
 ):
     """
     Copied from Plenoxels
@@ -76,7 +76,7 @@ def get_expon_lr_func(
 
 
 def get_linear_noise_func(
-        lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000
+    lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000
 ):
     """
     Copied from Plenoxels
@@ -128,11 +128,13 @@ def strip_symmetric(sym):
 
 
 def build_rotation(r):
-    norm = torch.sqrt(r[:, 0] * r[:, 0] + r[:, 1] * r[:, 1] + r[:, 2] * r[:, 2] + r[:, 3] * r[:, 3])
+    norm = torch.sqrt(
+        r[:, 0] * r[:, 0] + r[:, 1] * r[:, 1] + r[:, 2] * r[:, 2] + r[:, 3] * r[:, 3]
+    )
 
     q = r / norm[:, None]
 
-    R = torch.zeros((q.size(0), 3, 3), device='cuda')
+    R = torch.zeros((q.size(0), 3, 3), device="cuda")
 
     r = q[:, 0]
     x = q[:, 1]
@@ -173,7 +175,14 @@ def safe_state(silent):
         def write(self, x):
             if not self.silent:
                 if x.endswith("\n"):
-                    old_f.write(x.replace("\n", " [{}]\n".format(str(datetime.now().strftime("%d/%m %H:%M:%S")))))
+                    old_f.write(
+                        x.replace(
+                            "\n",
+                            " [{}]\n".format(
+                                str(datetime.now().strftime("%d/%m %H:%M:%S"))
+                            ),
+                        )
+                    )
                 else:
                     old_f.write(x)
 
@@ -186,3 +195,21 @@ def safe_state(silent):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.set_device(torch.device("cuda:0"))
+
+
+def farthest_point_sampling(tensor, num_samples):
+    n = tensor.size(0)
+    distances = torch.full((n,), float("inf"), device=tensor.device)
+    selected_indices = torch.zeros(num_samples, dtype=torch.long, device=tensor.device)
+
+    # Arbitrarily choose the first point as the starting point
+    current_index = torch.randint(0, n, (1,)).item()
+    for i in range(num_samples):
+        selected_indices[i] = current_index
+        current_point = tensor[current_index].unsqueeze(0)
+        dist = torch.norm(tensor - current_point, dim=1)
+        mask = dist < distances
+        distances[mask] = dist[mask]
+        current_index = torch.argmax(distances).item()
+
+    return tensor[selected_indices]
