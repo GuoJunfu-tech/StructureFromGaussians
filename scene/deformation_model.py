@@ -17,16 +17,14 @@ class DeformModel:
         self.spatial_lr_scale = 5
         self.deform_operator = RotationOperator()
 
-    def step(self, gaussians, axis, point_on_axis, theta, is_render=False):
-        return self.deform(gaussians, axis, point_on_axis, theta, is_render)
+    def step(self, xyz, rotation, axis, point_on_axis, theta, is_render=False):
+        return self.deform(xyz, rotation, axis, point_on_axis, theta, is_render)
 
     def deform(
-        self, gaussians, axis, point_on_axis, theta, is_render=False, factor=None
+        self, xyz, rotation, axis, point_on_axis, theta, is_render=False, factor=None
     ):
-        xyz = gaussians.get_xyz.detach()
-        quaternions = (
-            gaussians.get_rotation.detach()
-        )  # do not transfer the gradients to the original gaussians
+        xyz = xyz.detach()
+        quaternions = rotation.detach()
 
         if factor is not None:
             movable_factor = factor
@@ -47,7 +45,7 @@ class DeformModel:
 
         # new_xyz = xyz + movable_factor * (moved_xyz - xyz)
         new_rotations = moved_quaternion
-        return new_xyz, new_rotations
+        return new_xyz, new_rotations, movable_factor
 
     def train_setting(self, training_args):
         l = [

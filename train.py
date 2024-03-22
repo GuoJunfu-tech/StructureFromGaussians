@@ -164,7 +164,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
             # deformation
             new_xyz, new_rotations = deform.step(
-                gaussians, revolute.axis, revolute.pivot, revolute.theta
+                gaussians.get_xyz,
+                gaussians.get_rotations,
+                revolute.axis,
+                revolute.pivot,
+                revolute.theta,
             )
 
         d_scaling = 0.0  # TODO delete all d_scaling
