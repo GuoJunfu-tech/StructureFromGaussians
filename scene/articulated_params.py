@@ -17,15 +17,13 @@ class Revolute:
             requires_grad=True,
             device="cuda",
         )
-        self.theta = torch.tensor(
-            [math.pi / 2],
-            dtype=torch.float32,
-            requires_grad=True,
-            device="cuda",
-        )
-        self.optimizer = torch.optim.Adam(
-            [self.axis, self.theta, self.pivot], lr=0.01, eps=2e-15
-        )
+        # self.theta = torch.tensor(
+        #     [math.pi / 2],
+        #     dtype=torch.float32,
+        #     requires_grad=True,
+        #     device="cuda",
+        # )
+        self.optimizer = torch.optim.Adam([self.axis, self.pivot], lr=0.005, eps=2e-15)
         self.scheduler = torch.optim.lr_scheduler.StepLR(
-            self.optimizer, step_size=100, gamma=0.99
+            self.optimizer, step_size=100, gamma=0.9
         )

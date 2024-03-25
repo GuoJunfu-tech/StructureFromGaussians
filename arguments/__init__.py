@@ -93,7 +93,7 @@ class OptimizationParams(ParamGroup):
         self.opacity_lr = 0.05
         self.scaling_lr = 0.001
         self.rotation_lr = 0.001
-        self.movable_lr_init = 0.0001
+        self.movable_lr_init = 0.001
         self.movable_lr_final = 0.000001
         self.movable_lr_delay_mult = 0.01
         self.percent_dense = 0.01
@@ -105,7 +105,7 @@ class OptimizationParams(ParamGroup):
         self.densify_grad_threshold = 0.0002
 
         self.only_train_start_frame_gaussian = 3_000
-        self.train_deform_param_and_movable_net = 6_300
+        self.train_deform_param_and_movable_net = 8_300
         self.only_train_end_frame_gaussian = 18_000
         super().__init__(parser, "Optimization Parameters")
 

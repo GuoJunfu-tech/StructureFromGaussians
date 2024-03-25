@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -156,7 +157,7 @@ class MovableNetwork(nn.Module):
     def __init__(
         self,
         D=4,
-        W=64,
+        W=32,
         input_ch=3,
         output_ch=59,
         multires=10,
@@ -168,7 +169,7 @@ class MovableNetwork(nn.Module):
         self.input_ch = input_ch
         self.output_ch = output_ch
         self.t_multires = 6
-        # self.skips = [D // 2]  # FIXME why?
+        # self.skips = [D // 2]
 
         self.embed_time_fn, time_input_ch = get_embedder(self.t_multires, 1)
         self.embed_fn, xyz_input_ch = get_embedder(multires, 3)
@@ -187,13 +188,13 @@ class MovableNetwork(nn.Module):
         h = x_emb
         for i, l in enumerate(self.linear):
             h = self.linear[i](h)
-            h = F.relu(h)
+            h = F.tanh(h)
 
         h = self.movable_warp(h)
         # is_movable = torch.tanh(
         #     h * 0.1
         # )  # TODO maybe try more activate functions with higher gradient
         # is_movable = (1 + is_movable) / 2.0
-        is_movable = torch.sigmoid(h)
+        is_movable = torch.tanh(h)
 
         return is_movable

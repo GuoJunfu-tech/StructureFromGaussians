@@ -11,8 +11,21 @@ from utils.loss_utils import l1_loss, ssim, chamfer_distance_loss
 from utils.general_utils import farthest_point_sampling
 
 
-def visualize():
-    pass
+def visualize(xyz, factor):
+    import open3d as o3d
+    import numpy as np
+
+    pcd = o3d.geometry.PointCloud()
+    xyz = o3d.utility.Vector3dVector(xyz.detach().cpu().numpy())
+
+    factor = factor.detach().cpu().numpy()
+    colors = (factor - factor.min()) / (factor.max() - factor.min()) * 255
+    colors.astype(np.uint8)
+
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    vis.add_geometry(pcd)
+    vis.run()
 
 
 def get_images(
@@ -46,6 +59,12 @@ def get_images(
 
 
 if __name__ == "__main__":
+    with open("./end_frame_params.pkl", "rb") as f:
+        data = pickle.load(f)
+
+    visualize(data["xyz"], data["factors"])
+    exit()
+
     parser = ArgumentParser(description="Training script parameters")
     pp = PipelineParams(parser)
     op = OptimizationParams(parser)

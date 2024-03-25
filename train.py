@@ -14,6 +14,7 @@ import sys
 import math
 from random import randint
 from argparse import ArgumentParser, Namespace
+import dill as pickle
 
 import torch
 from tqdm import tqdm
@@ -73,16 +74,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     )
 
     # load gaussians
-    import dill as pickle
-
-    with open("./load_data/first_frame_gaussian.pkl", "rb") as f:
-        gaussians = pickle.load(f)
+    # with open("./load_data/first_frame_gaussian.pkl", "rb") as f:
+    #     gaussians = pickle.load(f)
     with open("./load_data/end_frame_gaussian.pkl", "rb") as f:
-        end_frame_gaussians = pickle.load(f)
+        data = pickle.load(f)
+    gaussians = data["gaussians"]
 
-    gt_xyz = farthest_point_sampling(
-        end_frame_gaussians["gaussians"].get_xyz.detach(), 1000
-    )
+    # gt_xyz = farthest_point_sampling(
+    #     end_frame_gaussians["gaussians"].get_xyz.detach(), 1000
+    # )
 
     viewpoint_stack = None
     for iteration in range(1 + opt.only_train_start_frame_gaussian, opt.iterations + 1):
@@ -112,11 +112,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             print(f"movable factors:")
             with torch.no_grad():
                 factors = deform.movable_network(gaussians.get_xyz)
-                move_parts = factors[factors > 0.8].shape[0]
-                unmove_parts = factors[factors < 0.2].shape[0]
-                print(
-                    f"move_parts: {move_parts}, unmove parts: {unmove_parts}, factors: {factors.shape[0]}"
-                )
+                # move_parts = factors[factors > 0.8].shape[0]
+                unmove_parts = factors[abs(factors) < 0.1].shape[0]
+                print(f"unmove parts: {unmove_parts}, factors: {factors.shape[0]}")
             get_images(
                 viewpoint_stack_end_frame,
                 gaussians,
@@ -125,10 +123,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 pipe,
                 background,
             )
-            # import dill as pickle
 
-            # data = {"gaussians": gaussians}
-            # with open("end_frame_gaussians.pkl", "wb") as f:
+            # data = {"xyz": gaussians.get_xyz, "factors": factors}
+            # with open("end_frame_params.pkl", "wb") as f:
             #     pickle.dump(data, f)
 
             exit()
@@ -154,7 +151,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             < opt.train_deform_param_and_movable_net
         ):
             if not viewpoint_stack:
-                viewpoint_stack = viewpoint_stack_end_frame.copy()
+                viewpoint_stack = viewpoint_stack_start_frame.copy()
 
             viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
             if dataset.load2gpu_on_the_fly:
@@ -163,12 +160,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             # N = gaussians.get_xyz.shape[0]
 
             # deformation
-            new_xyz, new_rotations = deform.step(
+            new_xyz, new_rotations, factor = deform.step(
                 gaussians.get_xyz,
-                gaussians.get_rotations,
+                gaussians.get_rotation,
                 revolute.axis,
                 revolute.pivot,
-                revolute.theta,
             )
 
         d_scaling = 0.0  # TODO delete all d_scaling
@@ -194,13 +190,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
+        # sp_loss = torch.sum(-1 * (factor - 0.5) ** 2)
 
-        cd_loss = chamfer_distance_loss(new_xyz, gt_xyz)
-        # loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-        #     1.0 - ssim(image, gt_image)
-        # )
-        # loss = loss + cd_loss
-        loss = cd_loss
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
+            1.0 - ssim(image, gt_image)  # + sp_loss * 1e-5
+        )
 
         loss.backward()
 
@@ -213,8 +207,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             if iteration % 10 == 0:
+                sp_loss = 0
                 progress_bar.set_postfix(
-                    {"Loss": f"{ema_loss_for_log:.{7}f}", "cd_loss": f"{cd_loss:.{7}f}"}
+                    {"Loss": f"{ema_loss_for_log:.{7}f}", "sp_loss": f"{sp_loss:.{7}f}"}
                 )
                 progress_bar.update(10)
             if iteration == opt.iterations:
@@ -231,36 +226,35 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             #     deform.save_weights(args.model_path, iteration)
 
             # Densification
-            if iteration < opt.only_train_start_frame_gaussian:  # TODO to be changed
-                gaussians.add_densification_stats(
-                    viewspace_point_tensor, visibility_filter
-                )
+            # if iteration < opt.only_train_start_frame_gaussian:  # TODO to be changed
+            #     gaussians.add_densification_stats(
+            #         viewspace_point_tensor, visibility_filter
+            #     )
 
-                if (
-                    iteration > opt.densify_from_iter
-                    and iteration % opt.densification_interval == 0
-                ):
-                    size_threshold = (
-                        20 if iteration > opt.opacity_reset_interval else None
-                    )
-                    gaussians.densify_and_prune(
-                        opt.densify_grad_threshold,
-                        0.005,
-                        scene.cameras_extent,
-                        size_threshold,
-                    )
+            #     if (
+            #         iteration > opt.densify_from_iter
+            #         and iteration % opt.densification_interval == 0
+            #     ):
+            #         size_threshold = (
+            #             20 if iteration > opt.opacity_reset_interval else None
+            #         )
+            #         gaussians.densify_and_prune(
+            #             opt.densify_grad_threshold,
+            #             0.005,
+            #             scene.cameras_extent,
+            #             size_threshold,
+            #         )
 
-                # TODO find why these
-                # if iteration % opt.opacity_reset_interval == 0 or (
-                #     dataset.white_background and iteration == opt.densify_from_iter
-                # ):
-                #     gaussians.reset_opacity()
+            #     if iteration % opt.opacity_reset_interval == 0 or (
+            #         dataset.white_background and iteration == opt.densify_from_iter
+            #     ):
+            #         gaussians.reset_opacity()
 
-            # Optimizer step
-            if iteration < opt.only_train_start_frame_gaussian:  # TODO temporary used
-                gaussians.optimizer.step()
-                gaussians.update_learning_rate(iteration)
-                gaussians.optimizer.zero_grad(set_to_none=True)
+            # # Optimizer step
+            # if iteration < opt.only_train_start_frame_gaussian:  # TODO temporary used
+            #     gaussians.optimizer.step()
+            #     gaussians.update_learning_rate(iteration)
+            #     gaussians.optimizer.zero_grad(set_to_none=True)
 
             if opt.only_train_start_frame_gaussian < iteration < opt.iterations:
                 deform.optimizer.step()
@@ -421,12 +415,11 @@ def get_images(
 ):
     # images = []
     for id, cam in enumerate(viewpoint_cams):
-        new_xyz, new_rotations = deformModel.step(
-            gaussians,
+        new_xyz, new_rotations, _ = deformModel.step(
+            gaussians.get_xyz,
+            gaussians.get_rotation,
             revoluteParams.axis,
             revoluteParams.pivot,
-            revoluteParams.theta,
-            is_render=True,
         )
         render_pkg_re = render(
             cam, gaussians, pipe, background, new_xyz, new_rotations, 0.0, False

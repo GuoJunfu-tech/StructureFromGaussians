@@ -17,11 +17,18 @@ class DeformModel:
         self.spatial_lr_scale = 5
         self.deform_operator = RotationOperator()
 
-    def step(self, xyz, rotation, axis, point_on_axis, theta, is_render=False):
-        return self.deform(xyz, rotation, axis, point_on_axis, theta, is_render)
+    def step(self, xyz, rotation, axis, point_on_axis, is_render=False):
+        return self.deform(xyz, rotation, axis, point_on_axis, is_render)
 
     def deform(
-        self, xyz, rotation, axis, point_on_axis, theta, is_render=False, factor=None
+        self,
+        xyz,
+        rotation,
+        axis,
+        point_on_axis,
+        movable_factor,
+        is_render=False,
+        factor=None,
     ):
         xyz = xyz.detach()
         quaternions = rotation.detach()
@@ -31,16 +38,16 @@ class DeformModel:
         else:
             movable_factor = self.movable_network(xyz)
 
+        theta = movable_factor * math.pi
+
         # if is_render:
         #     movable_factor = (movable_factor > 1e-3).float()
 
         axis = axis / torch.linalg.norm(axis)
-        new_xyz = self.deform_operator.get_new_location(
-            xyz, axis, point_on_axis, theta * movable_factor
-        )
+        new_xyz = self.deform_operator.get_new_location(xyz, axis, point_on_axis, theta)
 
         moved_quaternion = self.deform_operator.get_new_quaternion(
-            quaternions, axis, theta * movable_factor
+            quaternions, axis, theta
         )  # return the intermediate quaternion depend on movable_factor
 
         # new_xyz = xyz + movable_factor * (moved_xyz - xyz)
