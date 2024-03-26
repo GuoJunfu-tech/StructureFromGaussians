@@ -9,6 +9,40 @@ from argparse import ArgumentParser, Namespace
 from gaussian_renderer import render, network_gui
 from utils.loss_utils import l1_loss, ssim, chamfer_distance_loss
 from utils.general_utils import farthest_point_sampling
+from utils.classification_utils import kmeans, gmm
+
+
+def value_to_color(value):
+    """将单个数值转换为RGB颜色。"""
+    # 确保数值在0和1之间
+    value = np.clip(value, 0, 1)
+    # 线性插值计算R和B分量
+    red = int(255 * value)
+    blue = int(255 * (1 - value))
+    # 返回RGB颜色
+    return [red, 0, blue]
+
+
+def draw_graph(xyz, factor):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    # 生成一些随机数据
+    data = factor.detach().cpu().numpy()
+
+    # 绘制直方图
+    plt.figure(figsize=(10, 6))
+    plt.hist(data, bins=30)
+    plt.title("Histogram")
+
+    # # 绘制箱形图
+    # plt.subplot(1, 2, 2)
+    # sns.boxplot(data=data)
+    # plt.title("Box Plot")
+
+    plt.tight_layout()
+    plt.show()
 
 
 def visualize(xyz, factor):
@@ -16,16 +50,29 @@ def visualize(xyz, factor):
     import numpy as np
 
     pcd = o3d.geometry.PointCloud()
-    xyz = o3d.utility.Vector3dVector(xyz.detach().cpu().numpy())
+    xyz = xyz.detach().cpu().numpy()
+    pcd.points = o3d.utility.Vector3dVector(xyz)
 
-    factor = factor.detach().cpu().numpy()
-    colors = (factor - factor.min()) / (factor.max() - factor.min()) * 255
-    colors.astype(np.uint8)
+    factor = abs(factor.detach().cpu().numpy())
+    w = (factor - factor.min()) / (factor.max() - factor.min())
 
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    vis.add_geometry(pcd)
-    vis.run()
+    id_max, id_min = np.argmax(abs(w)), np.argmin(abs(w))
+
+    # X = np.hstack([xyz, w * 2])
+    X = w
+    # init_center = np.array([X[id_max], X[id_min]])
+    # _, clusters = kmeans(X, 2, init_center, 30)
+    clusters, _, _ = gmm(X, 2)
+
+    colors = np.zeros((xyz.shape[0], 3))
+    for cluster_id, cluster in enumerate(clusters):
+        colors[cluster_id, :] = [1, 0, 0] * cluster + [0, 0, 1] * (1 - cluster)
+
+    # colors = (w < 5e-2) * [1, 0, 0] + (w >= 5e-2) * [0, 0, 1]
+
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    o3d.visualization.draw_geometries([pcd])
 
 
 def get_images(
@@ -62,7 +109,8 @@ if __name__ == "__main__":
     with open("./end_frame_params.pkl", "rb") as f:
         data = pickle.load(f)
 
-    visualize(data["xyz"], data["factors"])
+    # visualize(data["xyz"], data["factors"])
+    draw_graph(data["xyz"], data["factors"])
     exit()
 
     parser = ArgumentParser(description="Training script parameters")

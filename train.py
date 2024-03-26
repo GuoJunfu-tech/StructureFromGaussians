@@ -76,7 +76,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     # load gaussians
     # with open("./load_data/first_frame_gaussian.pkl", "rb") as f:
     #     gaussians = pickle.load(f)
-    with open("./load_data/end_frame_gaussian.pkl", "rb") as f:
+    with open("./end_frame_params.pkl", "rb") as f:
         data = pickle.load(f)
     gaussians = data["gaussians"]
 
@@ -85,7 +85,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     # )
 
     viewpoint_stack = None
-    for iteration in range(1 + opt.only_train_start_frame_gaussian, opt.iterations + 1):
+    for iteration in range(1 + opt.continue_optimize_arti, opt.iterations + 1):
         iter_start.record()
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
@@ -102,13 +102,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         #         pickle.dump(gaussians, f)
         #         exit()
 
-        if iteration == opt.train_deform_param_and_movable_net:
+        if iteration == opt.continue_optimize_arti:
             scene.save(iteration)
             # deform.save_weights(args.model_path, iteration)
             print(f"predicted articulated params:")
-            print(
-                f"axis: {revolute.axis.tolist()}\n pivot: {revolute.pivot.tolist()}\n theta: {revolute.theta.item()}"
-            )
+            print(f"axis: {revolute.axis.tolist()}\n pivot: {revolute.pivot.tolist()}")
             print(f"movable factors:")
             with torch.no_grad():
                 factors = deform.movable_network(gaussians.get_xyz)
@@ -124,9 +122,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 background,
             )
 
-            # data = {"xyz": gaussians.get_xyz, "factors": factors}
-            # with open("end_frame_params.pkl", "wb") as f:
-            #     pickle.dump(data, f)
+            data = {
+                "gaussians": gaussians,
+                "xyz": gaussians.get_xyz,
+                "factors": factors,
+            }
+            with open("end_frame_params.pkl", "wb") as f:
+                pickle.dump(data, f)
 
             exit()
         if iteration < opt.only_train_start_frame_gaussian:
@@ -145,11 +147,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             viewpoint_stack = None
             print(f"step 1 is over, now training deformation net")
 
-        if (
-            opt.only_train_start_frame_gaussian
-            < iteration
-            < opt.train_deform_param_and_movable_net
-        ):
+        if opt.only_train_start_frame_gaussian < iteration < opt.continue_optimize_arti:
             if not viewpoint_stack:
                 viewpoint_stack = viewpoint_stack_start_frame.copy()
 
@@ -256,11 +254,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             #     gaussians.update_learning_rate(iteration)
             #     gaussians.optimizer.zero_grad(set_to_none=True)
 
-            if opt.only_train_start_frame_gaussian < iteration < opt.iterations:
+            if opt.only_train_start_frame_gaussian < iteration < opt.pretrain:
                 deform.optimizer.step()
                 deform.optimizer.zero_grad()
                 deform.update_learning_rate(iteration)
 
+            if (
+                opt.only_train_start_frame_gaussian
+                < iteration
+                < opt.continue_optimize_arti
+            ):
                 revolute.optimizer.step()
                 revolute.optimizer.zero_grad()
                 revolute.scheduler.step()
