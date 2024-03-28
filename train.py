@@ -12,7 +12,6 @@
 import os
 import sys
 import math
-from random import randint
 from argparse import ArgumentParser, Namespace
 import dill as pickle
 
@@ -21,12 +20,12 @@ from tqdm import tqdm
 import uuid
 
 from utils.loss_utils import l1_loss, ssim, kl_divergence, chamfer_distance_loss
-from utils.general_utils import farthest_point_sampling
 from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel, DeformModel, Revolute
 from utils.general_utils import safe_state, get_linear_noise_func
 from utils.image_utils import psnr
 from utils.classification_utils import build_mask
+from utils.viewpoint_utils import ViewpointLoader
 from arguments import ModelParams, PipelineParams, OptimizationParams
 
 try:
@@ -55,16 +54,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     iter_start = torch.cuda.Event(enable_timing=True)
     iter_end = torch.cuda.Event(enable_timing=True)
 
-    # set the viewpoint stack into two stacks, one for the start frame and one for the end frame
-    # TODO: this operation is really dump, we should read the frames separately
-    viewpoint_stack_full = scene.getTrainCameras().copy()
-    viewpoint_stack_start_frame = []
-    viewpoint_stack_end_frame = []
-    for viewpoint_cam in viewpoint_stack_full:
-        if viewpoint_cam.fid == 0:
-            viewpoint_stack_start_frame.append(viewpoint_cam)
-        else:
-            viewpoint_stack_end_frame.append(viewpoint_cam)
+    viewpoint_loader = ViewpointLoader(scene)
+    viewpoint_loader.refresh_current_stack(fid=1)
 
     ema_loss_for_log = 0.0
     best_psnr = 0.0
@@ -79,11 +70,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     #     data = pickle.load(f)
     with open("./end_frame_params.pkl", "rb") as f:
         data = pickle.load(f)
-
     gaussians = data["gaussians"]
     factors = data["factors"]
 
-    viewpoint_stack = None
     mask = None
     for iteration in range(opt.pretrain, opt.continue_optimize_arti + 1):
         iter_start.record()
@@ -92,9 +81,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
-        if dataset.load2gpu_on_the_fly:
-            viewpoint_cam.load2device()
-        # fid = viewpoint_cam.fid
         # if iteration == 2000:
         #     import dill as pickle
 
@@ -123,7 +109,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
             # revolute.theta = -1 / 2 * math.pi
             get_images(
-                viewpoint_stack_end_frame,
+                viewpoint_loader.get_viewpoint_frame(fid=0),
                 gaussians,
                 deform,
                 revolute,
@@ -141,48 +127,37 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             #     pickle.dump(data, f)
 
             exit()
-        if iteration < opt.only_train_start_frame_gaussian:
-            if not viewpoint_stack:
-                viewpoint_stack = viewpoint_stack_end_frame.copy()
 
-            viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
-            if dataset.load2gpu_on_the_fly:
-                viewpoint_cam.load2device()
+        if iteration < opt.only_train_single_frame_gaussian:
+            viewpoint_cam = viewpoint_loader.viewpoint_cam
 
-            # d_xyz, d_rotation = 0.0, 0.0
-            # fid = viewpoint_cam.fid
             new_xyz, new_rotations = None, None
 
-        if iteration == opt.only_train_start_frame_gaussian:
-            print(f"[Training]::step 1 is over, now training deformation net")
+        if opt.only_train_single_frame_gaussian == iteration:
+            print("[Training]::step 1 is over, now training deformation net")
+            viewpoint_loader.load_current_stack(fid=0)
 
         if opt.pretrain == iteration:
             print(f"[Training]::pretrain finished after {iteration} steps")
+            viewpoint_loader.refresh_current_stack(fid=0)
             mask, centers = build_mask(factors.detach().cpu().numpy())
             mask = torch.tensor(
                 mask, device="cuda", dtype=torch.float32, requires_grad=False
             )
-            revolute.set_up_theta(120 / 180 * math.pi)
+            revolute.set_up_theta(120 / 180 * math.pi)  # TODO delete
             # revolute.set_up_theta(centers[1].item())
-
-        # if opt.pretrain<iteration<opt.continue_optimize_arti:
-
-        if not viewpoint_stack:
-            viewpoint_stack = viewpoint_stack_start_frame.copy()
-
-        viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
-
-        if dataset.load2gpu_on_the_fly:
-            viewpoint_cam.load2device()
-
-        # N = gaussians.get_xyz.shape[0]
-
-        # deformation
-        new_xyz, new_rotations, factor = deform.step(
-            gaussians,
-            revolute,
-            mask,
-        )
+        if (
+            opt.only_train_single_frame_gaussian
+            <= iteration
+            <= opt.continue_optimize_arti
+        ):
+            viewpoint_cam = viewpoint_loader.viewpoint_cam
+            # deformation
+            new_xyz, new_rotations, factor = deform.step(
+                gaussians,
+                revolute,
+                mask,
+            )
 
         d_scaling = 0.0  # TODO delete all d_scaling
         # Render
@@ -273,13 +248,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             #     gaussians.update_learning_rate(iteration)
             #     gaussians.optimizer.zero_grad(set_to_none=True)
 
-            if opt.only_train_start_frame_gaussian < iteration < opt.pretrain:
+            if opt.only_train_single_frame_gaussian < iteration < opt.pretrain:
                 deform.optimizer.step()
                 deform.optimizer.zero_grad()
                 deform.update_learning_rate(iteration)
 
             if (
-                opt.only_train_start_frame_gaussian
+                opt.only_train_single_frame_gaussian
                 < iteration
                 < opt.continue_optimize_arti
             ):
