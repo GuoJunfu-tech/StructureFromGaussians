@@ -26,6 +26,7 @@ from utils.general_utils import safe_state, get_linear_noise_func
 from utils.image_utils import psnr
 from utils.classification_utils import build_mask
 from utils.viewpoint_utils import ViewpointLoader
+from utils.visualization_utils import render_results
 from arguments import ModelParams, PipelineParams, OptimizationParams
 
 try:
@@ -107,8 +108,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 move_parts = mask.sum()
                 print(f"move parts: {move_parts}, factors: {mask.shape[0]}")
 
-            # revolute.theta = -1 / 2 * math.pi
-            get_images(
+            render_results(
                 viewpoint_loader.get_viewpoint_frame(fid=0),
                 gaussians,
                 deform,
@@ -144,7 +144,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             mask = torch.tensor(
                 mask, device="cuda", dtype=torch.float32, requires_grad=False
             )
-            revolute.set_up_theta(120 / 180 * math.pi)  # TODO delete
+            revolute.set_theta(120 / 180 * math.pi)  # TODO delete
             # revolute.set_up_theta(centers[1].item())
         if (
             opt.only_train_single_frame_gaussian
@@ -405,35 +405,6 @@ def training_report(
         torch.cuda.empty_cache()
 
     return test_psnr
-
-
-def get_images(
-    viewpoint_cams,
-    gaussians,
-    deformModel,
-    revoluteParams,
-    factors,
-    pipe,
-    background,
-):
-    # images = []
-    for id, cam in enumerate(viewpoint_cams):
-        new_xyz, new_rotations, _ = deformModel.step(
-            gaussians,
-            revoluteParams,
-            factors,
-        )
-        render_pkg_re = render(
-            cam, gaussians, pipe, background, new_xyz, new_rotations, 0.0, False
-        )
-        image = render_pkg_re["render"]
-        image_np = image.detach().cpu().numpy().transpose((1, 2, 0))
-
-        from PIL import Image
-        import numpy as np
-
-        img = Image.fromarray(np.uint8(image_np * 255), "RGB")
-        img.save(f"./rendered_img/{id}.png", format="PNG")
 
 
 if __name__ == "__main__":

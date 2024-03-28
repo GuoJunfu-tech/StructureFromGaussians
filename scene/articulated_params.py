@@ -33,7 +33,7 @@ class Revolute:
         # )
         self._theta = None
 
-    def set_up_theta(self, theta):
+    def set_theta(self, theta):
         self._theta = self.float_to_torch(theta)
         self.theta_optimizer = torch.optim.Adam([self._theta], lr=0.005, eps=2e-15)
         self.theta_scheduler = torch.optim.lr_scheduler.StepLR(
