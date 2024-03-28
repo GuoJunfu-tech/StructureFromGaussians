@@ -188,7 +188,7 @@ class MovableNetwork(nn.Module):
         h = x_emb
         for i, l in enumerate(self.linear):
             h = self.linear[i](h)
-            h = F.tanh(h)
+            h = torch.tanh(h)
 
         h = self.movable_warp(h)
         # is_movable = torch.tanh(

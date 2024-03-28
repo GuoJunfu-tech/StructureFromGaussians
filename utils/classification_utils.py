@@ -98,7 +98,12 @@ def kmeans(X, k, init_centroids=None, max_iters=100):
             break
         centroids = new_centroids
 
-    return centroids, clusters
+    def predict_labels(X):
+        distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
+        labels = np.argmin(distances, axis=1)
+        return labels.reshape(-1, 1), distances[np.arrange(len(X), labels)]
+
+    return predict_labels, centroids
 
 
 def gmm(X, k, inti_centroid=None, max_iters=100):
@@ -107,6 +112,28 @@ def gmm(X, k, inti_centroid=None, max_iters=100):
     labels = gmm.predict(X)
     probs = gmm.predict_proba(X)
     return labels, probs, gmm.means_
+
+
+def build_mask(factors, method="gmm", max_iters=20):
+    if method == "gmm":
+        print(f"Using classification method GMM")
+        classify = gmm
+    elif method == "kmeans":
+        print(f"Using classification method KMeans")
+        classify = kmeans
+    else:
+        raise ValueError("Method not found")
+
+    labels, probs, centers = classify(factors, k=2, max_iters=max_iters)
+
+    # make sure that 0 represents the unmovable parts
+    if abs(centers[0]) > abs(centers[1]):
+        mask = np.ones_like(labels) - labels
+        centers[0, 0], centers[0, 1] = centers[0, 1], centers[0, 0]
+    else:
+        mask = labels
+
+    return mask, centers
 
 
 # 示例使用

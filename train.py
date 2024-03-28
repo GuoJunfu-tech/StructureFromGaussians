@@ -26,6 +26,7 @@ from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel, DeformModel, Revolute
 from utils.general_utils import safe_state, get_linear_noise_func
 from utils.image_utils import psnr
+from utils.classification_utils import build_mask
 from arguments import ModelParams, PipelineParams, OptimizationParams
 
 try:
@@ -74,18 +75,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     )
 
     # load gaussians
-    # with open("./load_data/first_frame_gaussian.pkl", "rb") as f:
-    #     gaussians = pickle.load(f)
+    # with open("./load_data/end_frame_gaussian.pkl", "rb") as f:
+    #     data = pickle.load(f)
     with open("./end_frame_params.pkl", "rb") as f:
         data = pickle.load(f)
-    gaussians = data["gaussians"]
 
-    # gt_xyz = farthest_point_sampling(
-    #     end_frame_gaussians["gaussians"].get_xyz.detach(), 1000
-    # )
+    gaussians = data["gaussians"]
+    factors = data["factors"]
 
     viewpoint_stack = None
-    for iteration in range(1 + opt.continue_optimize_arti, opt.iterations + 1):
+    mask = None
+    for iteration in range(opt.pretrain, opt.continue_optimize_arti + 1):
         iter_start.record()
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
@@ -104,36 +104,46 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         if iteration == opt.continue_optimize_arti:
             scene.save(iteration)
+            mask, centers = build_mask(factors.detach().cpu().numpy())
+            mask = torch.tensor(
+                mask, device="cuda", dtype=torch.float32, requires_grad=False
+            )
             # deform.save_weights(args.model_path, iteration)
             print(f"predicted articulated params:")
-            print(f"axis: {revolute.axis.tolist()}\n pivot: {revolute.pivot.tolist()}")
+            print(
+                f"axis: {revolute.axis.tolist()}\n pivot: {revolute.pivot.tolist()}\n theta: {revolute.theta.item()}\n"
+            )
             print(f"movable factors:")
             with torch.no_grad():
-                factors = deform.movable_network(gaussians.get_xyz)
+                # factors = deform.movable_network(gaussians.get_xyz)
                 # move_parts = factors[factors > 0.8].shape[0]
-                unmove_parts = factors[abs(factors) < 0.1].shape[0]
-                print(f"unmove parts: {unmove_parts}, factors: {factors.shape[0]}")
+                print(mask)
+                move_parts = mask.sum()
+                print(f"move parts: {move_parts}, factors: {mask.shape[0]}")
+
+            # revolute.theta = -1 / 2 * math.pi
             get_images(
                 viewpoint_stack_end_frame,
                 gaussians,
                 deform,
                 revolute,
+                mask,
                 pipe,
                 background,
             )
 
-            data = {
-                "gaussians": gaussians,
-                "xyz": gaussians.get_xyz,
-                "factors": factors,
-            }
-            with open("end_frame_params.pkl", "wb") as f:
-                pickle.dump(data, f)
+            # data = {
+            #     "gaussians": gaussians,
+            #     "xyz": gaussians.get_xyz,
+            #     "factors": factors,
+            # }
+            # with open("end_frame_params.pkl", "wb") as f:
+            #     pickle.dump(data, f)
 
             exit()
         if iteration < opt.only_train_start_frame_gaussian:
             if not viewpoint_stack:
-                viewpoint_stack = viewpoint_stack_start_frame.copy()
+                viewpoint_stack = viewpoint_stack_end_frame.copy()
 
             viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
             if dataset.load2gpu_on_the_fly:
@@ -144,26 +154,35 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             new_xyz, new_rotations = None, None
 
         if iteration == opt.only_train_start_frame_gaussian:
-            viewpoint_stack = None
-            print(f"step 1 is over, now training deformation net")
+            print(f"[Training]::step 1 is over, now training deformation net")
 
-        if opt.only_train_start_frame_gaussian < iteration < opt.continue_optimize_arti:
-            if not viewpoint_stack:
-                viewpoint_stack = viewpoint_stack_start_frame.copy()
-
-            viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
-            if dataset.load2gpu_on_the_fly:
-                viewpoint_cam.load2device()
-
-            # N = gaussians.get_xyz.shape[0]
-
-            # deformation
-            new_xyz, new_rotations, factor = deform.step(
-                gaussians.get_xyz,
-                gaussians.get_rotation,
-                revolute.axis,
-                revolute.pivot,
+        if opt.pretrain == iteration:
+            print(f"[Training]::pretrain finished after {iteration} steps")
+            mask, centers = build_mask(factors.detach().cpu().numpy())
+            mask = torch.tensor(
+                mask, device="cuda", dtype=torch.float32, requires_grad=False
             )
+            revolute.set_up_theta(120 / 180 * math.pi)
+            # revolute.set_up_theta(centers[1].item())
+
+        # if opt.pretrain<iteration<opt.continue_optimize_arti:
+
+        if not viewpoint_stack:
+            viewpoint_stack = viewpoint_stack_start_frame.copy()
+
+        viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
+
+        if dataset.load2gpu_on_the_fly:
+            viewpoint_cam.load2device()
+
+        # N = gaussians.get_xyz.shape[0]
+
+        # deformation
+        new_xyz, new_rotations, factor = deform.step(
+            gaussians,
+            revolute,
+            mask,
+        )
 
         d_scaling = 0.0  # TODO delete all d_scaling
         # Render
@@ -264,9 +283,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                 < iteration
                 < opt.continue_optimize_arti
             ):
-                revolute.optimizer.step()
-                revolute.optimizer.zero_grad()
-                revolute.scheduler.step()
+                revolute.axis_pivot_optimizer.step()
+                revolute.axis_pivot_optimizer.zero_grad()
+                revolute.axis_pivot_scheduler.step()
+
+            if opt.pretrain < iteration < opt.continue_optimize_arti:
+                revolute.theta_optimizer.step()
+                revolute.theta_optimizer.zero_grad()
+                revolute.theta_scheduler.step()
 
     print("Best PSNR = {} in Iteration {}".format(best_psnr, best_iteration))
 
@@ -413,16 +437,16 @@ def get_images(
     gaussians,
     deformModel,
     revoluteParams,
+    factors,
     pipe,
     background,
 ):
     # images = []
     for id, cam in enumerate(viewpoint_cams):
         new_xyz, new_rotations, _ = deformModel.step(
-            gaussians.get_xyz,
-            gaussians.get_rotation,
-            revoluteParams.axis,
-            revoluteParams.pivot,
+            gaussians,
+            revoluteParams,
+            factors,
         )
         render_pkg_re = render(
             cam, gaussians, pipe, background, new_xyz, new_rotations, 0.0, False

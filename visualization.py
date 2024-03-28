@@ -109,8 +109,8 @@ if __name__ == "__main__":
     with open("./end_frame_params.pkl", "rb") as f:
         data = pickle.load(f)
 
-    # visualize(data["xyz"], data["factors"])
-    draw_graph(data["xyz"], data["factors"])
+    visualize(data["xyz"], data["factors"])
+    # draw_graph(data["xyz"], data["factors"])
     exit()
 
     parser = ArgumentParser(description="Training script parameters")
