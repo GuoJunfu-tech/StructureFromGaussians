@@ -67,10 +67,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     )
 
     # load gaussians
-    # with open("./load_data/end_frame_gaussian.pkl", "rb") as f:
-    #     data = pickle.load(f)
-    with open("./end_frame_params.pkl", "rb") as f:
+    with open("./load_data/end_frame_params.pkl", "rb") as f:
         data = pickle.load(f)
+    # with open("./end_frame_params.pkl", "rb") as f:
+    #     data = pickle.load(f)
     gaussians = data["gaussians"]
     factors = data["factors"]
 
@@ -98,25 +98,37 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             # deform.save_weights(args.model_path, iteration)
             print(f"predicted articulated params:")
             print(
-                f"axis: {revolute.axis.tolist()}\n pivot: {revolute.pivot.tolist()}\n theta: {revolute.theta.item()}\n"
+                f"axis: {revolute.axis.tolist()}\n pivot: {revolute.pivot.tolist()}\n theta: {revolute.theta}\n"
             )
             print(f"movable factors:")
             with torch.no_grad():
-                # factors = deform.movable_network(gaussians.get_xyz)
+                #     factors = deform.movable_network(gaussians.get_xyz)
                 # move_parts = factors[factors > 0.8].shape[0]
-                print(mask)
-                move_parts = mask.sum()
-                print(f"move parts: {move_parts}, factors: {mask.shape[0]}")
+                # print(mask)
+                # move_parts = mask.sum()
+                # print(f"move parts: {move_parts}, factors: {mask.shape[0]}")
 
-            render_results(
-                viewpoint_loader.get_viewpoint_frame(fid=0),
-                gaussians,
-                deform,
-                revolute,
-                mask,
-                pipe,
-                background,
-            )
+                render_results(
+                    viewpoint_loader.get_viewpoint_frame(fid=0),
+                    gaussians,
+                    deform,
+                    revolute,
+                    mask,
+                    pipe,
+                    background,
+                    type="gif",
+                )
+
+                render_results(
+                    viewpoint_loader.get_viewpoint_frame(fid=0),
+                    gaussians,
+                    deform,
+                    revolute,
+                    mask,
+                    pipe,
+                    background,
+                    type="img",
+                )
 
             # data = {
             #     "gaussians": gaussians,
@@ -128,14 +140,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
             exit()
 
-        if iteration < opt.only_train_single_frame_gaussian:
+        if iteration < opt.only_train_single_frame:
             viewpoint_cam = viewpoint_loader.viewpoint_cam
 
             new_xyz, new_rotations = None, None
 
-        if opt.only_train_single_frame_gaussian == iteration:
+        if opt.only_train_single_frame == iteration:
             print("[Training]::step 1 is over, now training deformation net")
-            viewpoint_loader.load_current_stack(fid=0)
+            viewpoint_loader.refresh_current_stack(fid=0)
+            continue
 
         if opt.pretrain == iteration:
             print(f"[Training]::pretrain finished after {iteration} steps")
@@ -146,12 +159,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             )
             revolute.set_theta(120 / 180 * math.pi)  # TODO delete
             # revolute.set_up_theta(centers[1].item())
-        if (
-            opt.only_train_single_frame_gaussian
-            <= iteration
-            <= opt.continue_optimize_arti
-        ):
+        if opt.only_train_single_frame + 1 <= iteration <= opt.continue_optimize_arti:
             viewpoint_cam = viewpoint_loader.viewpoint_cam
+            # print(viewpoint_loader._current_fid)
             # deformation
             new_xyz, new_rotations, factor = deform.step(
                 gaussians,
@@ -217,47 +227,41 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             #     scene.save(iteration)
             #     deform.save_weights(args.model_path, iteration)
 
-            # Densification
-            # if iteration < opt.only_train_start_frame_gaussian:  # TODO to be changed
-            #     gaussians.add_densification_stats(
-            #         viewspace_point_tensor, visibility_filter
-            #     )
+            # Optimizer step
+            if iteration < opt.only_train_single_frame:  # TODO temporary used
+                # Densification
+                gaussians.add_densification_stats(
+                    viewspace_point_tensor, visibility_filter
+                )
 
-            #     if (
-            #         iteration > opt.densify_from_iter
-            #         and iteration % opt.densification_interval == 0
-            #     ):
-            #         size_threshold = (
-            #             20 if iteration > opt.opacity_reset_interval else None
-            #         )
-            #         gaussians.densify_and_prune(
-            #             opt.densify_grad_threshold,
-            #             0.005,
-            #             scene.cameras_extent,
-            #             size_threshold,
-            #         )
+                if (
+                    iteration > opt.densify_from_iter
+                    and iteration % opt.densification_interval == 0
+                ):
+                    size_threshold = (
+                        20 if iteration > opt.opacity_reset_interval else None
+                    )
+                    gaussians.densify_and_prune(
+                        opt.densify_grad_threshold,
+                        0.005,
+                        scene.cameras_extent,
+                        size_threshold,
+                    )
 
-            #     if iteration % opt.opacity_reset_interval == 0 or (
-            #         dataset.white_background and iteration == opt.densify_from_iter
-            #     ):
-            #         gaussians.reset_opacity()
+                if iteration % opt.opacity_reset_interval == 0 or (
+                    dataset.white_background and iteration == opt.densify_from_iter
+                ):
+                    gaussians.reset_opacity()
+                gaussians.optimizer.step()
+                gaussians.update_learning_rate(iteration)
+                gaussians.optimizer.zero_grad(set_to_none=True)
 
-            # # Optimizer step
-            # if iteration < opt.only_train_start_frame_gaussian:  # TODO temporary used
-            #     gaussians.optimizer.step()
-            #     gaussians.update_learning_rate(iteration)
-            #     gaussians.optimizer.zero_grad(set_to_none=True)
-
-            if opt.only_train_single_frame_gaussian < iteration < opt.pretrain:
+            if opt.only_train_single_frame < iteration < opt.pretrain:
                 deform.optimizer.step()
                 deform.optimizer.zero_grad()
                 deform.update_learning_rate(iteration)
 
-            if (
-                opt.only_train_single_frame_gaussian
-                < iteration
-                < opt.continue_optimize_arti
-            ):
+            if opt.only_train_single_frame < iteration < opt.continue_optimize_arti:
                 revolute.axis_pivot_optimizer.step()
                 revolute.axis_pivot_optimizer.zero_grad()
                 revolute.axis_pivot_scheduler.step()

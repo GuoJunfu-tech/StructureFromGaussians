@@ -45,7 +45,7 @@ def draw_graph(xyz, factor):
     plt.show()
 
 
-def visualize(xyz, factor):
+def visualize(xyz, factor=None):
     import open3d as o3d
     import numpy as np
 
@@ -53,8 +53,12 @@ def visualize(xyz, factor):
     xyz = xyz.detach().cpu().numpy()
     pcd.points = o3d.utility.Vector3dVector(xyz)
 
-    factor = abs(factor.detach().cpu().numpy())
-    w = (factor - factor.min()) / (factor.max() - factor.min())
+    if factor is None:
+        factor = np.ones((xyz.shape[0], 1))
+    else:
+        factor = abs(factor.detach().cpu().numpy())
+
+    w = (factor - factor.min()) / (1e-10 + factor.max() - factor.min())
 
     id_max, id_min = np.argmax(abs(w)), np.argmin(abs(w))
 
@@ -106,11 +110,14 @@ def get_images(
 
 
 if __name__ == "__main__":
-    with open("./end_frame_params.pkl", "rb") as f:
+    with open("./load_data/end_frame_params.pkl", "rb") as f:
         data = pickle.load(f)
 
-    visualize(data["xyz"], data["factors"])
-    # draw_graph(data["xyz"], data["factors"])
+    gaussians = data["gaussians"]
+    factors = data["factors"]
+
+    visualize(gaussians.get_xyz, data["factors"])
+    draw_graph(data["xyz"], data["factors"])
     exit()
 
     parser = ArgumentParser(description="Training script parameters")

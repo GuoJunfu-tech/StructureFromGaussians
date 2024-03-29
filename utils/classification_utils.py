@@ -129,22 +129,19 @@ def build_mask(factors, method="gmm", max_iters=20):
     # make sure that 0 represents the unmovable parts
     if abs(centers[0]) > abs(centers[1]):
         mask = np.ones_like(labels) - labels
-        centers[0, 0], centers[0, 1] = centers[0, 1], centers[0, 0]
+        centers = centers[-2:]
     else:
         mask = labels
 
     return mask, centers
 
 
-# 示例使用
 if __name__ == "__main__":
     from sklearn.datasets import make_blobs
     import matplotlib.pyplot as plt
 
-    # 生成模拟数据
     X, _ = make_blobs(n_samples=300, centers=4, cluster_std=0.60, random_state=0)
 
-    # 运行K-Means
     k = 4
     # centroids, clusters = kmeans(X, k)
     # print(clusters)

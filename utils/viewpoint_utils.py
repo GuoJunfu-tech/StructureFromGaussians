@@ -7,6 +7,7 @@ class ViewpointLoader:
         self._full_viewpoint = self._scene.getTrainCameras().copy()
         self._viewpoint_frames = {}
         self._current_stack = None
+        self._current_fid = None
 
     def _load_frame_viewpoint(self):
         for viewpoint_cam in self._full_viewpoint:
@@ -26,7 +27,7 @@ class ViewpointLoader:
         return self._current_stack
 
     def refresh_current_stack(self, fid=None):
-        if not fid:
+        if fid is None:
             self._current_stack = self._full_viewpoint
             return
 
