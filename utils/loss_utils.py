@@ -142,3 +142,21 @@ def chamfer_distance_loss(
     # Compute final Chamfer distance
     chamfer_distance = torch.mean(min_dist_1_to_2) + torch.mean(min_dist_2_to_1)
     return chamfer_distance
+
+
+def opacity_loss(radii, gaussians, factor=0.1):
+    visibility_filter = radii > 0
+    vis_opacities = gaussians.get_opacity[visibility_filter]
+    opacity_loss = (
+        factor
+        * (
+            -vis_opacities * torch.log(vis_opacities + 1e-10)
+            - (1 - vis_opacities) * torch.log(1 - vis_opacities + 1e-10)
+        ).mean()
+    )
+    return opacity_loss
+
+
+def regularization_loss(radii, gaussians, factor=0.1):
+    visibility_filter = radii > 0
+    vis_opacities = gaussians.get_opacity[visibility_filter]
